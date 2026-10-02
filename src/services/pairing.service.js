@@ -1,18 +1,14 @@
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const db = require('../config/db');
+const deviceService = require('./device.service');
 
 // Generar un código numérico aleatorio de 6 dígitos para el tutor
 const generatePairingCode = async (userId) => {
-  // 1. Generar código de 6 dígitos (ej. "482910")
   const plainCode = Math.floor(100000 + Math.random() * 900000).toString();
-
-  // 2. Hashear el código por seguridad
   const codeHash = await bcrypt.hash(plainCode, 10);
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min
 
-  // 3. Expiración en 15 minutos
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-
-  // 4. Guardar en DB
   const result = await db.query(
     `INSERT INTO pairing_codes (id_user, code_hash, expires_at)
      VALUES ($1, $2, $3)
@@ -21,22 +17,14 @@ const generatePairingCode = async (userId) => {
   );
 
   return {
-    code: plainCode, // Se lo mostramos al tutor en pantalla
+    code: plainCode,
     expiresAt: result.rows[0].expires_at
   };
 };
 
 // Consumir el código desde el dispositivo del menor
 const consumePairingCode = async (data) => {
-  const {
-    code,
-    nombre_alias,
-    fecha_nacimiento,
-    genero,
-    device_uuid,
-    modelo_os,
-    push_token
-  } = data;
+  const { code, ...deviceData } = data;
 
   // 1. Buscar códigos vigentes no usados
   const activeCodesResult = await db.query(
@@ -70,36 +58,25 @@ const consumePairingCode = async (data) => {
     [matchedRecord.id]
   );
 
-  // 4. Registrar o actualizar el dispositivo asociado al id_user del tutor
+  // 4. Reutilizar el servicio de devices para crear o actualizar el equipo
   const userId = matchedRecord.id_user;
+  const device = await deviceService.linkDevice(userId, deviceData);
 
-  const existingDevice = await db.query(
-    'SELECT id FROM devices WHERE device_uuid = $1',
-    [device_uuid]
+  // 5. Registrar la sesión de dispositivo en device_sessions
+  const deviceToken = crypto.randomBytes(32).toString('hex');
+  const deviceTokenHash = await bcrypt.hash(deviceToken, 10);
+  const sessionExpiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000); // 1 año
+
+  await db.query(
+    `INSERT INTO device_sessions (id_device, device_token_hash, is_active, expires_at)
+     VALUES ($1, $2, true, $3)`,
+    [device.id, deviceTokenHash, sessionExpiresAt]
   );
-
-  let device;
-  if (existingDevice.rows.length > 0) {
-    const updated = await db.query(
-      `UPDATE devices 
-       SET id_user = $1, nombre_alias = $2, fecha_nacimiento = $3, genero = $4, 
-           modelo_os = $5, vinculado = true, push_token = $6, ultimo_ping = CURRENT_TIMESTAMP
-       WHERE device_uuid = $7
-       RETURNING *`,
-      [userId, nombre_alias, fecha_nacimiento || null, genero || null, modelo_os, push_token || null, device_uuid]
-    );
-    device = updated.rows[0];
-  } else {
-    const inserted = await db.query(
-      `INSERT INTO devices (id_user, nombre_alias, fecha_nacimiento, genero, device_uuid, modelo_os, push_token, ultimo_ping)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
-       RETURNING *`,
-      [userId, nombre_alias, fecha_nacimiento || null, genero || null, device_uuid, modelo_os, push_token || null]
-    );
-    device = inserted.rows[0];
-  }
-
-  return device;
+  
+  return {
+    device,
+    deviceToken // Devolvemos el token en texto plano para que la app del menor lo guarde
+  };
 };
 
 module.exports = {
