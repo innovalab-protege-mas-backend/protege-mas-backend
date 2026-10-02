@@ -3,11 +3,13 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('./db'); // Importamos la conexión que creamos en db.js
 const dns = require('dns');
+const authenticateToken = require('./authMiddleware');
+const { JWT_SECRET } = require('./config');
+
 dns.setDefaultResultOrder('ipv4first');
 
 const app = express();
 
-const JWT_SECRET = 'secreto_super_seguro_poc';
 
 // Middleware obligatorio para que Express entienda el formato JSON que le mandamos
 app.use(express.json());
@@ -89,7 +91,7 @@ app.post('/api/auth/login', async (req, res) => {
     const token = jwt.sign(
       { userId: user.id, email: user.email },
       JWT_SECRET,
-      { expiresIn: '8h' }
+      { expiresIn: '1h' }
     );
 
     // D. Responder con el token y datos públicos del usuario
@@ -106,4 +108,14 @@ app.post('/api/auth/login', async (req, res) => {
     console.error(error);
     res.status(500).json({ error: 'Error en el servidor: ' + error.message });
   }
+});
+
+//-------------------------------------
+// 4. prueba de middleware
+//---------------------------------------
+app.get('/api/protected/profile', authenticateToken, (req, res) => {
+  res.json({
+    message: 'Acceso concedido a ruta protegida',
+    user: req.user
+  });
 });
