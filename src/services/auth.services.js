@@ -1,7 +1,7 @@
 const db = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const config = require('../config/config');
+const { JWT_SECRET } = require('../config/config');
 
 const register = async ({ nombre, apellido, email, password, genero, fecha_nacimiento }) => {
   // 1. Verificar si el email ya existe
@@ -39,7 +39,7 @@ const login = async ({ email, password }) => {
 
   const token = jwt.sign(
     { id: user.id, email: user.email },
-    config.jwtSecret || 'secret_key',
+    JWT_SECRET,
     { expiresIn: '24h' }
   );
 
