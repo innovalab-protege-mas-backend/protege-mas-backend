@@ -1,12 +1,9 @@
 const { Pool } = require('pg');
 
-// Configuración de la conexión a PostgreSQL local
+// Configuración de la conexión a PostgreSQL en supabase
 const pool = new Pool({
-  user: 'postgres',           // Tu usuario de postgres (suele ser 'postgres')
-  host: 'localhost',
-  database: 'alerta_infantil_db', // El nombre de la BBDD que creaste
-  password: 'tu_password',    // La contraseña que le pusiste a postgres
-  port: 5432,
+  connectionString: 'postgres://postgres.qisgdgmwgupirwbrmkze:protegemasdbver00@aws-0-sa-east-1.pooler.supabase.com:5432/postgres',
+  ssl: { rejectUnauthorized: false }
 });
 
 module.exports = pool;

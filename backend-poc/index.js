@@ -1,8 +1,13 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const db = require('./db'); // Importamos la conexión que creamos en db.js
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first');
 
 const app = express();
+
+const JWT_SECRET = 'secreto_super_seguro_poc';
 
 // Middleware obligatorio para que Express entienda el formato JSON que le mandamos
 app.use(express.json());
@@ -52,4 +57,53 @@ app.post('/api/users/register', async (req, res) => {
 const PUERTO = 3000;
 app.listen(PUERTO, () => {
   console.log(` Servidor corriendo exitosamente en http://localhost:${PUERTO}`);
+});
+
+// -------------------------------------------------------------
+// 3. ENDPOINT DE LOGIN (POST /api/auth/login)
+// Verifica credenciales y devuelve un Token JWT
+// -------------------------------------------------------------
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // A. Buscar el usuario por email
+    const userResult = await db.query(
+      'SELECT * FROM users WHERE email = $1',
+      [email]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    const user = userResult.rows[0];
+
+    // B. Comparar la contraseña ingresada con el hash guardado
+    const passwordMatch = await bcrypt.compare(password, user.password_hash);
+    if (!passwordMatch) {
+      return res.status(401).json({ error: 'Credenciales inválidas' });
+    }
+
+    // C. Generar el Token JWT
+    const token = jwt.sign(
+      { userId: user.id, email: user.email },
+      JWT_SECRET,
+      { expiresIn: '8h' }
+    );
+
+    // D. Responder con el token y datos públicos del usuario
+    res.json({
+      message: 'Login exitoso',
+      token: token,
+      user: {
+        id: user.id,
+        email: user.email
+      }
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error en el servidor: ' + error.message });
+  }
 });
