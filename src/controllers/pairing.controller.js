@@ -23,7 +23,7 @@ const consumeCode = async (req, res) => {
     const device = await pairingService.consumePairingCode(validatedData);
 
     return res.status(200).json({
-      message: 'Dispositivo vinculado con éxito mediante código',
+      message: 'Dispositivo vinculado con éxito',
       device
     });
   } catch (error) {

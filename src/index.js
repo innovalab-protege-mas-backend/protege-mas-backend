@@ -1,9 +1,9 @@
 const express = require('express');
-const config = require('./src/config/config');
-const authRoutes = require('./src/routes/auth.routes');
-const deviceRoutes = require('./src/routes/device.routes');
-const pairingRoutes = require('./src/routes/pairing.routes');
-const eventRoutes = require('./src/routes/event.routes');
+const config = require('./config/config');
+const authRoutes = require('./routes/auth.routes');
+const deviceRoutes = require('./routes/device.routes');
+const pairingRoutes = require('./routes/pairing.routes');
+const eventRoutes = require('./routes/event.routes');
 
 const app = express();
 app.use(express.json());

@@ -41,7 +41,47 @@ const getEvents = async (req, res) => {
   }
 };
 
+const getAlerts = async (req, res) => {
+  try {
+    const userId = req.user.id; // Del JWT
+    const { soloNoLeidas, limite } = req.query;
+
+    const alerts = await eventService.getAlertsForTutor(userId, { soloNoLeidas, limite });
+    
+    return res.status(200).json({
+      count: alerts.length,
+      alerts
+    });
+  } catch (error) {
+    console.error('Error al obtener alertas:', error);
+    return res.status(500).json({ error: 'Error interno al consultar alertas' });
+  }
+};
+
+const markAsRead = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    const updatedAlert = await eventService.markAlertAsRead(id, userId);
+
+    if (!updatedAlert) {
+      return res.status(404).json({ error: 'Alerta no encontrada o no pertenece al tutor' });
+    }
+
+    return res.status(200).json({
+      message: 'Alerta marcada como leída',
+      alert: updatedAlert
+    });
+  } catch (error) {
+    console.error('Error al actualizar alerta:', error);
+    return res.status(500).json({ error: 'Error interno al actualizar la alerta' });
+  }
+};
+
 module.exports = {
   recibirEvento,
-  getEvents
+  getEvents,
+  getAlerts,
+  markAsRead
 };

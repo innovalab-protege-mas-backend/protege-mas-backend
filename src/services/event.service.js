@@ -1,13 +1,45 @@
 const db = require('../config/db');
 const notificationService = require('./notifications/notification.service');
 
-// Evalúa si un evento es crítico según el diagrama de clases
+// ============================================================================
+// FUNCIONES AUXILIARES Y LÓGICA DE NEGOCIO
+// ============================================================================
+
+/**
+ * Evalúa si un tipo de evento requiere la generación de alerta crítica.
+ * @param {string} tipoEvento - Identificador del tipo de evento.
+ * @returns {boolean} True si el evento es de carácter crítico.
+ */
 const esCritico = (tipoEvento) => {
   const eventosCriticos = ['uninstall_attempt', 'lotba', 'score_exceeded'];
   return eventosCriticos.includes(tipoEvento);
 };
 
-// Genera un título y cuerpo amigable para la notificación según el evento
+/**
+ * Determina el nivel de severidad asignado para la tabla 'alerts'.
+ * @param {string} tipoEvento - Tipo de evento registrado.
+ * @returns {'critical' | 'warning' | 'info'} Nivel de severidad para el ENUM de BD.
+ */
+const obtenerSeveridad = (tipoEvento) => {
+  switch (tipoEvento) {
+    case 'lotba':
+    case 'uninstall_attempt':
+      return 'critical';
+    case 'score_exceeded':
+    case 'os_permission_change':
+      return 'warning';
+    default:
+      return 'info';
+  }
+};
+
+/**
+ * Construye los textos descriptivos para las notificaciones y mensajes de alerta.
+ * @param {string} tipoEvento - Identificador del evento.
+ * @param {string} aliasDispositivo - Nombre descriptivo del dispositivo del menor.
+ * @param {string|null} url - Dirección web asociada (si aplica).
+ * @returns {{title: string, body: string}}
+ */
 const construirMensajeNotificacion = (tipoEvento, aliasDispositivo, url) => {
   switch (tipoEvento) {
     case 'lotba':
@@ -28,18 +60,22 @@ const construirMensajeNotificacion = (tipoEvento, aliasDispositivo, url) => {
     default:
       return {
         title: `🔔 Alerta de Protección en ${aliasDispositivo}`,
-        body: `Se registró un evento crítico de tipo: ${tipoEvento}`
+        body: `Se registró un evento de tipo: ${tipoEvento}`
       };
   }
 };
 
-// Busca los push_tokens del tutor y despacha las notificaciones
+/**
+ * Consulta tokens Push activos del tutor y despacha notificaciones asincrónicas.
+ * @param {Object} evento - Objeto de evento registrado en BD.
+ * @param {string} deviceId - UUID interno del dispositivo en la base de datos.
+ */
 const procesarAlertaSiCorresponde = async (evento, deviceId) => {
   if (!esCritico(evento.tipo_evento)) {
-    return null; // No es crítico, no se envía notificación
+    return null;
   }
 
-  // 1. Obtener los push_tokens de las sesiones activas del tutor dueño del dispositivo
+  // Obtener push_tokens activos del tutor asociado al dispositivo
   const query = `
     SELECT us.push_token, d.nombre_alias
     FROM devices d
@@ -52,14 +88,13 @@ const procesarAlertaSiCorresponde = async (evento, deviceId) => {
   const result = await db.query(query, [deviceId]);
 
   if (result.rows.length === 0) {
-    console.log(`[Alertas] Evento crítico detectado (${evento.tipo_evento}), pero no hay tokens Push activos para el tutor.`);
     return null;
   }
 
   const aliasDispositivo = result.rows[0].nombre_alias || 'Dispositivo Protegido';
   const { title, body } = construirMensajeNotificacion(evento.tipo_evento, aliasDispositivo, evento.url);
 
-  // 2. Enviar notificación a cada sesión activa del tutor
+  // Enviar push a cada sesión activa
   const notificacionesEnviadas = [];
   for (const row of result.rows) {
     const response = await notificationService.enviarNotificacion(row.push_token, {
@@ -78,53 +113,104 @@ const procesarAlertaSiCorresponde = async (evento, deviceId) => {
   return notificacionesEnviadas;
 };
 
-// Insertar un único evento en la base de datos
+// ============================================================================
+// REGISTRO Y PERSISTENCIA DE EVENTOS
+// ============================================================================
+
+/**
+ * Inserta un único evento en base de datos de manera transaccional.
+ * Crea el registro en 'alerts' si el evento es calificado como crítico.
+ * @param {Object} eventData - Payload validado del evento.
+ */
 const createSingleEvent = async (eventData) => {
-  const { device_uuid, tipo_evento, url, detalle, es_sensible, event_time } = eventData;
+  const { device_uuid, tipo_evento, url, detalle, event_time } = eventData;
+  const client = await db.connect();
 
-  // 1. Obtener ID del dispositivo
-  const deviceResult = await db.query(
-    'SELECT id FROM devices WHERE device_uuid = $1',
-    [device_uuid]
-  );
+  try {
+    await client.query('BEGIN');
 
-  if (deviceResult.rows.length === 0) {
-    throw new Error('DEVICE_NOT_FOUND');
+    // 1. Obtener ID interno del dispositivo mediante device_uuid
+    const deviceResult = await client.query(
+      'SELECT id, nombre_alias FROM devices WHERE device_uuid = $1',
+      [device_uuid]
+    );
+
+    if (deviceResult.rows.length === 0) {
+      throw new Error('DEVICE_NOT_FOUND');
+    }
+
+    const device = deviceResult.rows[0];
+
+    // 2. Registrar evento en la tabla 'protection_events'
+    const eventQuery = `
+      INSERT INTO protection_events (id_device, tipo_evento, url, detalle, event_time)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `;
+
+    const eventValues = [
+      device.id,
+      tipo_evento,
+      url || null,
+      JSON.stringify(detalle || {}),
+      event_time || new Date()
+    ];
+
+    const eventResult = await client.query(eventQuery, eventValues);
+    const createdEvent = eventResult.rows[0];
+
+    // 3. Crear registro en 'alerts' si aplica severidad
+    let createdAlert = null;
+    if (esCritico(tipo_evento)) {
+      const { title } = construirMensajeNotificacion(tipo_evento, device.nombre_alias, url);
+      const severidad = obtenerSeveridad(tipo_evento);
+
+      // Importante: $2::enum_alert_severity realiza el casteo explícito al ENUM de Postgres
+      const alertQuery = `
+        INSERT INTO alerts (id_event, nivel_severidad, message, leido, alert_time)
+        VALUES ($1, $2::enum_alert_severity, $3, false, $4)
+        RETURNING *
+      `;
+      
+      const alertResult = await client.query(alertQuery, [
+        createdEvent.id,
+        severidad,
+        title,
+        createdEvent.event_time
+      ]);
+      
+      createdAlert = alertResult.rows[0];
+    }
+
+    await client.query('COMMIT');
+
+    // 4. Despacho asincrónico de notificaciones Push (No bloqueante)
+    try {
+      procesarAlertaSiCorresponde(createdEvent, device.id).catch(err => {
+        console.error('[Push Notification Error]:', err.message);
+      });
+    } catch (pushErr) {
+      console.error('[Push Notification Sync Error]:', pushErr.message);
+    }
+
+    return {
+      ...createdEvent,
+      es_critico: esCritico(createdEvent.tipo_evento),
+      alert: createdAlert
+    };
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
   }
-
-  const deviceId = deviceResult.rows[0].id;
-
-  // 2. Insertar respetando los nombres exactos de la tabla en el DER
-  const query = `
-    INSERT INTO protection_events (id_device, tipo_evento, url, detalle, event_time)
-    VALUES ($1, $2, $3, $4, $5)
-    RETURNING *
-  `;
-
-  const values = [
-    deviceId,
-    tipo_evento,
-    url || null,
-    JSON.stringify(detalle || {}),
-    event_time || new Date()
-  ];
-
-  const result = await db.query(query, values);
-  const createdEvent = result.rows[0];
-
-  // Disparar procesamiento de alerta asincrónico
-  procesarAlertaSiCorresponde(createdEvent, deviceId).catch(err => {
-    console.error('Error al procesar la alerta de notificación:', err);
-  });
-
-  // Agregamos la respuesta calculada de esCritico()
-  return {
-    ...createdEvent,
-    es_critico: esCritico(createdEvent.tipo_evento)
-  };
 };
 
-// Reportar uno o varios eventos (Batch processing)
+/**
+ * Punto de entrada público para procesar un evento individual o un lote (array).
+ * @param {Object|Array} data - Objeto o arreglo de objetos validados por Zod.
+ */
 const registrarEvento = async (data) => {
   if (Array.isArray(data)) {
     const results = [];
@@ -138,7 +224,15 @@ const registrarEvento = async (data) => {
   return await createSingleEvent(data);
 };
 
-// Consultar eventos para la app del tutor
+// ============================================================================
+// CONSULTAS PARA LA APLICACIÓN DEL TUTOR
+// ============================================================================
+
+/**
+ * Obtiene el historial de eventos pertenecientes a los dispositivos de un tutor.
+ * @param {string} userId - UUID del tutor autenticado.
+ * @param {string|null} filterDeviceId - ID de dispositivo opcional para filtrar.
+ */
 const getEventsByTutor = async (userId, filterDeviceId = null) => {
   let query = `
     SELECT 
@@ -166,14 +260,76 @@ const getEventsByTutor = async (userId, filterDeviceId = null) => {
 
   const result = await db.query(query, queryParams);
 
-  // Mapeamos los resultados con es_critico
   return result.rows.map(event => ({
     ...event,
     es_critico: esCritico(event.tipo_evento)
   }));
 };
 
+/**
+ * Obtiene el listado de alertas generadas para la app del tutor.
+ * @param {string} userId - UUID del tutor.
+ * @param {Object} opciones - Filtros de consulta (soloNoLeidas, limite).
+ */
+const getAlertsForTutor = async (userId, { soloNoLeidas, limite = 20 } = {}) => {
+  let query = `
+    SELECT 
+      a.id AS alert_id,
+      a.nivel_severidad,
+      a.message,
+      a.leido,
+      a.alert_time,
+      pe.id AS event_id,
+      pe.tipo_evento,
+      pe.url,
+      pe.detalle,
+      pe.event_time,
+      d.id AS device_id,
+      d.nombre_alias,
+      d.device_uuid
+    FROM alerts a
+    JOIN protection_events pe ON a.id_event = pe.id
+    JOIN devices d ON pe.id_device = d.id
+    WHERE d.id_user = $1
+  `;
+
+  const queryParams = [userId];
+
+  if (soloNoLeidas === 'true') {
+    queryParams.push(false);
+    query += ` AND a.leido = $${queryParams.length}`;
+  }
+
+  query += ` ORDER BY a.alert_time DESC LIMIT $${queryParams.length + 1}`;
+  queryParams.push(limite);
+
+  const { rows } = await db.query(query, queryParams);
+  return rows;
+};
+
+/**
+ * Actualiza el estado de una alerta a leída asegurando propiedad del tutor.
+ * @param {string} alertId - ID de la alerta a actualizar.
+ * @param {string} userId - ID del tutor en sesión.
+ */
+const markAlertAsRead = async (alertId, userId) => {
+  const query = `
+    UPDATE alerts a
+    SET leido = true
+    FROM protection_events pe
+    JOIN devices d ON pe.id_device = d.id
+    WHERE a.id_event = pe.id 
+      AND a.id = $1 
+      AND d.id_user = $2
+    RETURNING a.id, a.leido;
+  `;
+  const { rows } = await db.query(query, [alertId, userId]);
+  return rows[0];
+};
+
 module.exports = {
   registrarEvento,
-  getEventsByTutor
+  getEventsByTutor,
+  getAlertsForTutor,
+  markAlertAsRead
 };

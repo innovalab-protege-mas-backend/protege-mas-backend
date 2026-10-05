@@ -8,5 +8,6 @@ router.post('/', eventController.recibirEvento);
 
 // Endpoint para que el tutor consulte sus eventos (Protegido por JWT)
 router.get('/', authenticateToken, eventController.getEvents);
+router.patch('/:id/read', authenticateToken, eventController.markAsRead);
 
 module.exports = router;
