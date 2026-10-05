@@ -4,17 +4,32 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { JWT_SECRET } = require('../config/config');
 
+// ============================================================================
+// SERVICIOS DE AUTENTICACIÓN Y GESTIÓN DE SESIONES
+// ============================================================================
+
+/**
+ * Registra un nuevo usuario (tutor) en el sistema.
+ * @param {Object} userData - Datos de registro del tutor.
+ * @param {string} [userData.nombre] - Nombre del tutor.
+ * @param {string} [userData.apellido] - Apellido del tutor.
+ * @param {string} userData.email - Correo electrónico institucional o personal.
+ * @param {string} userData.password - Contraseña en texto plano a encriptar.
+ * @param {string} [userData.genero] - Género del usuario.
+ * @param {string} [userData.fecha_nacimiento] - Fecha de nacimiento (YYYY-MM-DD).
+ * @returns {Promise<Object>} Datos del usuario registrado excluyendo el hash del password.
+ */
 const register = async ({ nombre, apellido, email, password, genero, fecha_nacimiento }) => {
-  // 1. Verificar si el email ya existe
+  // 1. Verificar si el email ya existe en la base de datos
   const existingUser = await db.query('SELECT id FROM users WHERE email = $1', [email]);
   if (existingUser.rows.length > 0) {
     throw new Error('EL_EMAIL_YA_EXISTE');
   }
 
-  // 2. Hash de contraseña
+  // 2. Generar el hash de la contraseña usando Bcrypt
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  // 3. Insertar con los campos del DER
+  // 3. Insertar el nuevo usuario mapeando los campos del DER
   const result = await db.query(
     `INSERT INTO users (nombre, apellido, email, password_hash, genero, fecha_nacimiento) 
      VALUES ($1, $2, $3, $4, $5, $6) 
@@ -25,10 +40,18 @@ const register = async ({ nombre, apellido, email, password, genero, fecha_nacim
   return result.rows[0];
 };
 
+/**
+ * Autentica un tutor, genera sus tokens de acceso/refresco y registra la sesión activa.
+ * @param {Object} credentials - Credenciales de acceso.
+ * @param {string} credentials.email - Correo electrónico registrado.
+ * @param {string} credentials.password - Contraseña enviada por el cliente.
+ * @param {Object} [reqInfo={}] - Información contextual de la petición (IP, dispositivo, pushToken).
+ * @returns {Promise<Object>} Tokens de autenticación y datos básicos del usuario.
+ */
 const login = async (credentials, reqInfo = {}) => {
   const { email, password } = credentials;
 
-  // 1. Validar existencia del usuario
+  // 1. Validar la existencia del usuario en la BD
   const userResult = await db.query('SELECT * FROM users WHERE email = $1', [email]);
   const user = userResult.rows[0];
 
@@ -36,17 +59,17 @@ const login = async (credentials, reqInfo = {}) => {
     throw new Error('CREDANCIALES_INVALIDAS');
   }
 
-  // 2. Firmar JWT para el tutor
+  // 2. Firmar token JWT con vigencia de 24 horas
   const token = jwt.sign(
     { id: user.id, email: user.email },
     JWT_SECRET,
     { expiresIn: '24h' }
   );
 
-  // 3. Crear hash del refresh token y guardar la User Session
+  // 3. Generar refresh token seguro, hashearlo y registrar la sesión (Vigencia 7 días)
   const refreshToken = crypto.randomBytes(40).toString('hex');
   const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 días
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   await db.query(
     `INSERT INTO user_sessions (id_user, refresh_token_hash, push_token, device_info, ip_address, expires_at)

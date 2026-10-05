@@ -1,8 +1,17 @@
 const eventService = require('../services/event.service');
 const { reportEventSchema } = require('../schemas/event.schema');
 
+// ============================================================================
+// CONTROLADOR DE EVENTOS DE PROTECCIÓN Y ALERTAS
+// ============================================================================
+
+/**
+ * Recibe y procesa uno o más eventos de protección desde la app móvil.
+ * @route POST /api/events
+ */
 const recibirEvento = async (req, res) => {
   try {
+    // Valida eventos individuales o batches (listados) mediante Zod
     const validatedData = reportEventSchema.parse(req.body);
     const result = await eventService.registrarEvento(validatedData);
 
@@ -14,7 +23,7 @@ const recibirEvento = async (req, res) => {
     });
   } catch (error) {
     if (error.name === 'ZodError') {
-      return res.status(400).json({ error: error.issues?.[0].message });
+      return res.status(400).json({ error: error.issues?.[0]?.message || 'Datos de evento inválidos' });
     }
     if (error.message === 'DEVICE_NOT_FOUND') {
       return res.status(404).json({ error: 'Dispositivo no encontrado o no vinculado' });
@@ -24,6 +33,11 @@ const recibirEvento = async (req, res) => {
   }
 };
 
+/**
+ * Consulta el historial de eventos para la vista del tutor.
+ * Permite filtrado opcional por dispositivo mediante query param (`?deviceId=...`).
+ * @route GET /api/events
+ */
 const getEvents = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -41,9 +55,13 @@ const getEvents = async (req, res) => {
   }
 };
 
+/**
+ * Obtiene las alertas críticas/advertencias para la app del tutor.
+ * @route GET /api/events/alerts
+ */
 const getAlerts = async (req, res) => {
   try {
-    const userId = req.user.id; // Del JWT
+    const userId = req.user.id;
     const { soloNoLeidas, limite } = req.query;
 
     const alerts = await eventService.getAlertsForTutor(userId, { soloNoLeidas, limite });
@@ -58,6 +76,10 @@ const getAlerts = async (req, res) => {
   }
 };
 
+/**
+ * Marca una alerta específica como leída por el tutor.
+ * @route PATCH /api/events/alerts/:id/read
+ */
 const markAsRead = async (req, res) => {
   try {
     const userId = req.user.id;

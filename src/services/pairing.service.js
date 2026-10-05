@@ -1,13 +1,21 @@
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const db = require('../config/db');
-const deviceService = require('./device.service');
 
-// Generar un código numérico aleatorio de 6 dígitos para el tutor
+// ============================================================================
+// SERVICIOS DE EMPAREJAMIENTO DE DISPOSITIVOS (PAIRING)
+// ============================================================================
+
+/**
+ * Genera un código PIN aleatorio de 6 dígitos para que el tutor inicie el emparejamiento.
+ * El código se almacena encriptado (Bcrypt) y vence a los 15 minutos.
+ * @param {string} userId - UUID del tutor autenticado.
+ * @returns {Promise<{code: string, expiresAt: Date}>} Código en texto plano para mostrar al tutor y fecha de expiración.
+ */
 const generatePairingCode = async (userId) => {
   const plainCode = Math.floor(100000 + Math.random() * 900000).toString();
   const codeHash = await bcrypt.hash(plainCode, 10);
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 min
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // Expiración: 15 minutos
 
   const result = await db.query(
     `INSERT INTO pairing_codes (id_user, code_hash, expires_at)
@@ -22,14 +30,23 @@ const generatePairingCode = async (userId) => {
   };
 };
 
-// Consumir el código desde el dispositivo del menor
+/**
+ * Valida y consume el código de emparejamiento ingresado desde el dispositivo del menor.
+ * Ejecuta una transacción atómica para marcar el código como usado e insertar/actualizar el dispositivo.
+ * @param {Object} params - Datos enviados desde la aplicación del menor.
+ * @param {string} params.code - Código PIN numérico de 6 dígitos ingresado.
+ * @param {string} params.device_uuid - UUID único del hardware del dispositivo.
+ * @param {string} params.nombre_alias - Nombre asignado al dispositivo.
+ * @param {string} params.modelo_os - Sistema operativo y versión del dispositivo.
+ * @returns {Promise<Object>} Registro del dispositivo creado o actualizado.
+ */
 const consumePairingCode = async ({ code, device_uuid, nombre_alias, modelo_os }) => {
   const client = await db.connect();
 
   try {
     await client.query('BEGIN');
 
-    // 1. Obtener los códigos activos no consumidos y no vencidos
+    // 1. Consultar todos los códigos activos no consumidos y dentro del rango de tiempo válido
     const activeCodesResult = await client.query(
       `SELECT * FROM pairing_codes 
        WHERE used = false AND expires_at > NOW()`
@@ -39,9 +56,7 @@ const consumePairingCode = async ({ code, device_uuid, nombre_alias, modelo_os }
       throw new Error('INVALID_OR_EXPIRED_CODE');
     }
 
-    const pairingRecord = activeCodeResult.rows[0];
-
-    // 2. Buscar el registro que coincida con el hash de bcrypt
+    // 2. Comparar la clave ingresada contra los hashes de los códigos activos
     let validPairingRecord = null;
     for (const record of activeCodesResult.rows) {
       const isMatch = await bcrypt.compare(code, record.code_hash);
@@ -55,13 +70,13 @@ const consumePairingCode = async ({ code, device_uuid, nombre_alias, modelo_os }
       throw new Error('INVALID_OR_EXPIRED_CODE');
     }
 
-    // 3. Marcar código como usado (used = true)
+    // 3. Marcar el código de emparejamiento como consumido (used = true)
     await client.query(
       `UPDATE pairing_codes SET used = true WHERE id = $1`,
       [validPairingRecord.id]
     );
 
-    // 4. Crear o actualizar el dispositivo asociado al tutor
+    // 4. Crear el nuevo dispositivo o actualizar el tutor asociado en caso de re-emparejamiento
     const deviceResult = await client.query(
       `INSERT INTO devices (id_user, device_uuid, nombre_alias, modelo_os)
        VALUES ($1, $2, $3, $4)

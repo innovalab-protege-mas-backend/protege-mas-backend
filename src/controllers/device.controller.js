@@ -1,25 +1,13 @@
 const deviceService = require('../services/device.service');
-const { linkDeviceSchema } = require('../schemas/device.schema');
 
-const linkDevice = async (req, res) => {
-  try {
-    const validatedData = linkDeviceSchema.parse(req.body);
-    const userId = req.user.id; // Obtenido desde el token mediante el authMiddleware
+// ============================================================================
+// CONTROLADOR DE GESTIÓN DE DISPOSITIVOS
+// ============================================================================
 
-    const device = await deviceService.linkDevice(userId, validatedData);
-    return res.status(201).json({
-      message: 'Dispositivo vinculado con éxito',
-      device
-    });
-  } catch (error) {
-    if (error.name === 'ZodError') {
-      return res.status(400).json({ errors: error.errors });
-    }
-    console.error('Error al vincular dispositivo:', error);
-    return res.status(500).json({ error: 'Error interno al vincular dispositivo' });
-  }
-};
-
+/**
+ * Consulta la lista de dispositivos asignados al tutor en sesión.
+ * @route GET /api/devices
+ */
 const getDevices = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -32,6 +20,5 @@ const getDevices = async (req, res) => {
 };
 
 module.exports = {
-  linkDevice,
   getDevices
 };
