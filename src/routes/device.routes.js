@@ -13,4 +13,7 @@ router.use(authenticateToken);
 // Obtener el listado de dispositivos pertenecientes al tutor autenticado
 router.get('/', deviceController.getDevices);
 
+// Desvincular un dispositivo específico por su ID
+router.patch('/:id/unlink', deviceController.unlinkDevice);
+
 module.exports = router;
