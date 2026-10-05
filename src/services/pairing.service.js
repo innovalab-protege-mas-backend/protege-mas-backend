@@ -76,20 +76,30 @@ const consumePairingCode = async ({ code, device_uuid, nombre_alias, modelo_os }
       [validPairingRecord.id]
     );
 
-    // 4. Crear el nuevo dispositivo o actualizar el tutor asociado en caso de re-emparejamiento
+    // 4. Generar Credencial Revocable (Device Token)
+    const deviceToken = `dev_ak_${crypto.randomBytes(32).toString('hex')}`;
+
+    // 5. Crear o actualizar el dispositivo asociando la nueva credencial
     const deviceResult = await client.query(
-      `INSERT INTO devices (id_user, device_uuid, nombre_alias, modelo_os)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO devices (id_user, device_uuid, nombre_alias, modelo_os, device_token, vinculado)
+       VALUES ($1, $2, $3, $4, $5, true)
        ON CONFLICT (device_uuid) DO UPDATE 
        SET id_user = EXCLUDED.id_user, 
            nombre_alias = EXCLUDED.nombre_alias, 
-           modelo_os = EXCLUDED.modelo_os
+           modelo_os = EXCLUDED.modelo_os,
+           device_token = EXCLUDED.device_token,
+           vinculado = true,
+           ultimo_ping = CURRENT_TIMESTAMP
        RETURNING *`,
-      [validPairingRecord.id_user, device_uuid, nombre_alias, modelo_os]
+      [validPairingRecord.id_user, device_uuid, nombre_alias, modelo_os, deviceToken]
     );
 
     await client.query('COMMIT');
-    return deviceResult.rows[0];
+
+    return {
+      device: deviceResult.rows[0],
+      deviceToken // Retornamos la credencial revocable para que la app del menor la guarde
+    };
 
   } catch (error) {
     await client.query('ROLLBACK');

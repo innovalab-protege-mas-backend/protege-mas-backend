@@ -2,13 +2,14 @@ const express = require('express');
 const router = express.Router();
 const eventController = require('../controllers/event.controller');
 const authenticateToken = require('../middlewares/authMiddleware');
+const deviceAuthMiddleware = require('../middlewares/deviceAuthMiddleware');
 
 // ============================================================================
 // RUTAS DE EVENTOS DE PROTECCIÓN Y ALERTAS
 // ============================================================================
 
 // Recepción de eventos desde la app del menor (Público, validado por device_uuid)
-router.post('/', eventController.recibirEvento);
+router.post('/', deviceAuthMiddleware, eventController.recibirEvento);
 
 // Consulta de historial de eventos por el tutor (Protegido por JWT)
 router.get('/', authenticateToken, eventController.getEvents);
