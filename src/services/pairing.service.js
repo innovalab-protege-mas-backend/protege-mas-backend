@@ -23,60 +23,65 @@ const generatePairingCode = async (userId) => {
 };
 
 // Consumir el código desde el dispositivo del menor
-const consumePairingCode = async (data) => {
-  const { code, ...deviceData } = data;
+const consumePairingCode = async ({ code, device_uuid, nombre_alias, modelo_os }) => {
+  const client = await db.connect();
 
-  // 1. Buscar códigos vigentes no usados
-  const activeCodesResult = await db.query(
-    `SELECT * FROM pairing_codes 
-     WHERE used = false AND expires_at > CURRENT_TIMESTAMP`
-  );
+  try {
+    await client.query('BEGIN');
 
-  const activeCodes = activeCodesResult.rows;
+    // 1. Obtener los códigos activos no consumidos y no vencidos
+    const activeCodesResult = await client.query(
+      `SELECT * FROM pairing_codes 
+       WHERE used = false AND expires_at > NOW()`
+    );
 
-  if (activeCodes.length === 0) {
-    throw new Error('Código de vinculación inválido o expirado.');
-  }
-
-  // 2. Verificar cuál código coincide con el hash
-  let matchedRecord = null;
-  for (const record of activeCodes) {
-    const isMatch = await bcrypt.compare(code, record.code_hash);
-    if (isMatch) {
-      matchedRecord = record;
-      break;
+    if (activeCodesResult.rows.length === 0) {
+      throw new Error('INVALID_OR_EXPIRED_CODE');
     }
+
+    const pairingRecord = activeCodeResult.rows[0];
+
+    // 2. Buscar el registro que coincida con el hash de bcrypt
+    let validPairingRecord = null;
+    for (const record of activeCodesResult.rows) {
+      const isMatch = await bcrypt.compare(code, record.code_hash);
+      if (isMatch) {
+        validPairingRecord = record;
+        break;
+      }
+    }
+
+    if (!validPairingRecord) {
+      throw new Error('INVALID_OR_EXPIRED_CODE');
+    }
+
+    // 3. Marcar código como usado (used = true)
+    await client.query(
+      `UPDATE pairing_codes SET used = true WHERE id = $1`,
+      [validPairingRecord.id]
+    );
+
+    // 4. Crear o actualizar el dispositivo asociado al tutor
+    const deviceResult = await client.query(
+      `INSERT INTO devices (id_user, device_uuid, nombre_alias, modelo_os)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (device_uuid) DO UPDATE 
+       SET id_user = EXCLUDED.id_user, 
+           nombre_alias = EXCLUDED.nombre_alias, 
+           modelo_os = EXCLUDED.modelo_os
+       RETURNING *`,
+      [validPairingRecord.id_user, device_uuid, nombre_alias, modelo_os]
+    );
+
+    await client.query('COMMIT');
+    return deviceResult.rows[0];
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
   }
-
-  if (!matchedRecord) {
-    throw new Error('Código de vinculación incorrecto o expirado.');
-  }
-
-  // 3. Marcar código como usado
-  await db.query(
-    'UPDATE pairing_codes SET used = true WHERE id = $1',
-    [matchedRecord.id]
-  );
-
-  // 4. Reutilizar el servicio de devices para crear o actualizar el equipo
-  const userId = matchedRecord.id_user;
-  const device = await deviceService.linkDevice(userId, deviceData);
-
-  // 5. Registrar la sesión de dispositivo en device_sessions
-  const deviceToken = crypto.randomBytes(32).toString('hex');
-  const deviceTokenHash = await bcrypt.hash(deviceToken, 10);
-  const sessionExpiresAt = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000); // 1 año
-
-  await db.query(
-    `INSERT INTO device_sessions (id_device, device_token_hash, is_active, expires_at)
-     VALUES ($1, $2, true, $3)`,
-    [device.id, deviceTokenHash, sessionExpiresAt]
-  );
-  
-  return {
-    device,
-    deviceToken // Devolvemos el token en texto plano para que la app del menor lo guarde
-  };
 };
 
 module.exports = {

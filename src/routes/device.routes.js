@@ -6,7 +6,7 @@ const authenticateToken = require('../middlewares/authMiddleware');
 // Todas las rutas de dispositivos requieren autenticación del tutor
 router.use(authenticateToken);
 
-router.post('/', deviceController.linkDevice);
+//router.post('/', deviceController.linkDevice);
 router.get('/', deviceController.getDevices);
 
 module.exports = router;
