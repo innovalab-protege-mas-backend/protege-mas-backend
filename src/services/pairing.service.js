@@ -81,17 +81,23 @@ const consumePairingCode = async ({ code, device_uuid, nombre_alias, modelo_os }
 
     // 5. Crear o actualizar el dispositivo asociando la nueva credencial
     const deviceResult = await client.query(
-      `INSERT INTO devices (id_user, device_uuid, nombre_alias, modelo_os, device_token, vinculado)
-       VALUES ($1, $2, $3, $4, $5, true)
+      `INSERT INTO devices (id_user, device_uuid, nombre_alias, modelo_os, device_token, push_token, vinculado)
+       VALUES ($1, $2, $3, $4, $5, $6, true)
        ON CONFLICT (device_uuid) DO UPDATE 
        SET id_user = EXCLUDED.id_user, 
            nombre_alias = EXCLUDED.nombre_alias, 
            modelo_os = EXCLUDED.modelo_os,
            device_token = EXCLUDED.device_token,
+           push_token = EXCLUDED.push_token,
            vinculado = true,
            ultimo_ping = CURRENT_TIMESTAMP
        RETURNING *`,
-      [validPairingRecord.id_user, device_uuid, nombre_alias, modelo_os, deviceToken]
+      [validPairingRecord.id_user, 
+        device_uuid, 
+        nombre_alias, 
+        modelo_os, 
+        deviceToken, 
+        push_token || null]
     );
 
     await client.query('COMMIT');
