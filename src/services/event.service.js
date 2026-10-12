@@ -11,7 +11,7 @@ const notificationService = require('./notifications/notification.service');
  * @returns {boolean} True si el evento es de carácter crítico.
  */
 const esCritico = (tipoEvento) => {
-  const eventosCriticos = ['uninstall_attempt', 'lotba', 'score_exceeded'];
+  const eventosCriticos = ['uninstall_attempt', 'lotba', 'score_exceeded', 'os_permission_change'];
   return eventosCriticos.includes(tipoEvento);
 };
 

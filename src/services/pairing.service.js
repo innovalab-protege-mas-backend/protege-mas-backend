@@ -38,9 +38,10 @@ const generatePairingCode = async (userId) => {
  * @param {string} params.device_uuid - UUID único del hardware del dispositivo.
  * @param {string} params.nombre_alias - Nombre asignado al dispositivo.
  * @param {string} params.modelo_os - Sistema operativo y versión del dispositivo.
+ * @param {string} params.push_token - Token de notificación push del dispositivo. 
  * @returns {Promise<Object>} Registro del dispositivo creado o actualizado.
  */
-const consumePairingCode = async ({ code, device_uuid, nombre_alias, modelo_os }) => {
+const consumePairingCode = async ({ code, device_uuid, nombre_alias, fecha_nacimiento, genero, modelo_os, push_token }) => {
   const client = await db.connect();
 
   try {
@@ -81,11 +82,13 @@ const consumePairingCode = async ({ code, device_uuid, nombre_alias, modelo_os }
 
     // 5. Crear o actualizar el dispositivo asociando la nueva credencial
     const deviceResult = await client.query(
-      `INSERT INTO devices (id_user, device_uuid, nombre_alias, modelo_os, device_token, push_token, vinculado)
-       VALUES ($1, $2, $3, $4, $5, $6, true)
+      `INSERT INTO devices (id_user, device_uuid, nombre_alias, fecha_nacimiento, genero, modelo_os, device_token, push_token, vinculado, ultimo_ping)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, CURRENT_TIMESTAMP)
        ON CONFLICT (device_uuid) DO UPDATE 
        SET id_user = EXCLUDED.id_user, 
            nombre_alias = EXCLUDED.nombre_alias, 
+           fecha_nacimiento = EXCLUDED.fecha_nacimiento,
+           genero = EXCLUDED.genero,
            modelo_os = EXCLUDED.modelo_os,
            device_token = EXCLUDED.device_token,
            push_token = EXCLUDED.push_token,
@@ -95,16 +98,18 @@ const consumePairingCode = async ({ code, device_uuid, nombre_alias, modelo_os }
       [validPairingRecord.id_user, 
         device_uuid, 
         nombre_alias, 
+        fecha_nacimiento || null,
+        genero || null,
         modelo_os, 
         deviceToken, 
-        push_token || null]
+        push_token || null
+      ]
     );
-
+    
     await client.query('COMMIT');
 
     return {
       device: deviceResult.rows[0],
-      deviceToken // Retornamos la credencial revocable para que la app del menor la guarde
     };
 
   } catch (error) {

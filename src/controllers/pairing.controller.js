@@ -32,11 +32,12 @@ const generateCode = async (req, res) => {
 const consumeCode = async (req, res) => {
   try {
     const validatedData = consumeCodeSchema.parse(req.body);
-    const device = await pairingService.consumePairingCode(validatedData);
+    const {device, deviceToken} = await pairingService.consumePairingCode(validatedData);
 
     return res.status(200).json({
       message: 'Dispositivo vinculado con éxito',
-      device
+      device,
+      deviceToken
     });
   } catch (error) {
     if (error.name === 'ZodError') {
