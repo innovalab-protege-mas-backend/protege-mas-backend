@@ -36,12 +36,12 @@ const generatePairingCode = async (userId) => {
  * @param {Object} params - Datos enviados desde la aplicación del menor.
  * @param {string} params.code - Código PIN numérico de 6 dígitos ingresado.
  * @param {string} params.device_uuid - UUID único del hardware del dispositivo.
- * @param {string} params.nombre_alias - Nombre asignado al dispositivo.
- * @param {string} params.modelo_os - Sistema operativo y versión del dispositivo.
+ * @param {string} params.alias_name - Nombre asignado al dispositivo.
+ * @param {string} params.os_model - Sistema operativo y versión del dispositivo.
  * @param {string} params.push_token - Token de notificación push del dispositivo. 
  * @returns {Promise<Object>} Registro del dispositivo creado o actualizado.
  */
-const consumePairingCode = async ({ code, device_uuid, nombre_alias, fecha_nacimiento, genero, modelo_os, push_token }) => {
+const consumePairingCode = async ({ code, device_uuid, alias_name, birth_date, gender, os_model, push_token }) => {
   const client = await db.connect();
 
   try {
@@ -82,25 +82,25 @@ const consumePairingCode = async ({ code, device_uuid, nombre_alias, fecha_nacim
 
     // 5. Crear o actualizar el dispositivo asociando la nueva credencial
     const deviceResult = await client.query(
-      `INSERT INTO devices (id_user, device_uuid, nombre_alias, fecha_nacimiento, genero, modelo_os, device_token, push_token, vinculado, ultimo_ping)
+      `INSERT INTO devices (id_user, device_uuid, alias_name, birth_date, gender, os_model, device_token, push_token, linked, last_ping)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, CURRENT_TIMESTAMP)
        ON CONFLICT (device_uuid) DO UPDATE 
        SET id_user = EXCLUDED.id_user, 
-           nombre_alias = EXCLUDED.nombre_alias, 
-           fecha_nacimiento = EXCLUDED.fecha_nacimiento,
-           genero = EXCLUDED.genero,
-           modelo_os = EXCLUDED.modelo_os,
+           alias_name = EXCLUDED.alias_name, 
+           birth_date = EXCLUDED.birth_date,
+           gender = EXCLUDED.gender,
+           os_model = EXCLUDED.os_model,
            device_token = EXCLUDED.device_token,
            push_token = EXCLUDED.push_token,
-           vinculado = true,
-           ultimo_ping = CURRENT_TIMESTAMP
+           linked = true,
+           last_ping = CURRENT_TIMESTAMP
        RETURNING *`,
       [validPairingRecord.id_user, 
         device_uuid, 
-        nombre_alias, 
-        fecha_nacimiento || null,
-        genero || null,
-        modelo_os, 
+        alias_name, 
+        birth_date || null,
+        gender || null,
+        os_model, 
         deviceToken, 
         push_token || null
       ]

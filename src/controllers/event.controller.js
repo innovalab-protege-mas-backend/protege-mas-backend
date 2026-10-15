@@ -1,4 +1,4 @@
-const eventService = require('../services/event.service');
+const eventService = require('../services/event.services');
 const { reportEventSchema } = require('../schemas/event.schema');
 
 // ============================================================================

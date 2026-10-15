@@ -11,15 +11,15 @@ const { JWT_SECRET } = require('../config/config');
 /**
  * Registra un nuevo usuario (tutor) en el sistema.
  * @param {Object} userData - Datos de registro del tutor.
- * @param {string} [userData.nombre] - Nombre del tutor.
- * @param {string} [userData.apellido] - Apellido del tutor.
+ * @param {string} [userData.name] - name del tutor.
+ * @param {string} [userData.surname] - surname del tutor.
  * @param {string} userData.email - Correo electrónico institucional o personal.
  * @param {string} userData.password - Contraseña en texto plano a encriptar.
- * @param {string} [userData.genero] - Género del usuario.
- * @param {string} [userData.fecha_nacimiento] - Fecha de nacimiento (YYYY-MM-DD).
+ * @param {string} [userData.gender] - Género del usuario.
+ * @param {string} [userData.birth_date] - Fecha de nacimiento (YYYY-MM-DD).
  * @returns {Promise<Object>} Datos del usuario registrado excluyendo el hash del password.
  */
-const register = async ({ nombre, apellido, email, password, genero, fecha_nacimiento }) => {
+const register = async ({ name, surname, email, password, gender, birth_date }) => {
   // 1. Verificar si el email ya existe en la base de datos
   const existingUser = await db.query('SELECT id FROM users WHERE email = $1', [email]);
   if (existingUser.rows.length > 0) {
@@ -31,10 +31,10 @@ const register = async ({ nombre, apellido, email, password, genero, fecha_nacim
 
   // 3. Insertar el nuevo usuario mapeando los campos del DER
   const result = await db.query(
-    `INSERT INTO users (nombre, apellido, email, password_hash, genero, fecha_nacimiento) 
+    `INSERT INTO users (name, surname, email, password_hash, gender, birth_date) 
      VALUES ($1, $2, $3, $4, $5, $6) 
-     RETURNING id, nombre, apellido, email, creation_time`,
-    [nombre || null, apellido || null, email, hashedPassword, genero || null, fecha_nacimiento || null]
+     RETURNING id, name, surname, email, creation_time`,
+    [name || null, surname || null, email, hashedPassword, gender || null, birth_date || null]
   );
 
   return result.rows[0];
@@ -56,7 +56,7 @@ const login = async (credentials, reqInfo = {}) => {
   const user = userResult.rows[0];
 
   if (!user || !(await bcrypt.compare(password, user.password_hash))) {
-    throw new Error('CREDANCIALES_INVALIDAS');
+    throw new Error('CREDENCIALES_INVALIDAS');
   }
 
   // 2. Firmar token JWT con vigencia de 24 horas
@@ -86,7 +86,7 @@ const login = async (credentials, reqInfo = {}) => {
 
   return {
     message: 'Login exitoso',
-    user: { id: user.id, email: user.email, nombre: user.nombre },
+    user: { id: user.id, email: user.email, name: user.name },
     token,
     refreshToken
   };

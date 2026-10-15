@@ -15,25 +15,42 @@ const getDevicesByUser = async (userId) => {
 /**
  * Desvincula un dispositivo del tutor (revoca credenciales y apaga el flag de vinculación).
  */
-const unlinkDevice = async (deviceId, userId) => {
-  const result = await db.query(
-    `UPDATE devices 
-      SET vinculado = false,
-          estado_proteccion = false,
-          device_token = NULL, 
-          push_token = NULL 
-      WHERE id = $1 AND id_user = $2 AND vinculado = true
-      RETURNING id, nombre_alias, vinculado, estado_proteccion`,
-    [deviceId, userId]
+const unlinkDevice = async (deviceUuid, deviceToken) => {
+  // 1. Buscamos el dispositivo por su UUID para verificar su existencia y token
+  const checkResult = await db.query(
+    `SELECT id, device_token, linked FROM devices WHERE device_uuid = $1`,
+    [deviceUuid]
   );
 
-  // Si no actualizó ninguna fila, es porque el dispositivo no existe, 
-  // no le pertenece al tutor o YA ESTABA desvinculado./
-  if (result.rows.length === 0) {
-    throw new Error('DEVICE_NOT_FOUND_OR_ALREADY_UNLINKED');
+  if (checkResult.rows.length === 0) {
+    throw new Error('DEVICE_NOT_FOUND');
   }
 
-  return result.rows[0];
+  const device = checkResult.rows[0];
+
+  // 2. Validación cruzada: verificamos que el device_token del header coincida con el de la BD
+  if (device.device_token !== deviceToken) {
+    throw new Error('INVALID_DEVICE_CREDENTIALS');
+  }
+
+  // Si ya estaba deslinked, podemos manejarlo o proceder a actualizar igual
+  if (!device.linked) {
+    throw new Error('DEVICE_ALREADY_UNLINKED');
+  }
+
+  // 3. Ejecutamos la desvinculación y limpieza de credenciales
+  const updateResult = await db.query(
+    `UPDATE devices 
+      SET linked = false,
+          protection_status = false,
+          device_token = NULL, 
+          push_token = NULL 
+      WHERE device_uuid = $1 
+      RETURNING id, alias_name, linked, protection_status`,
+    [deviceUuid]
+  );
+
+  return updateResult.rows[0];
 };
 
 module.exports = {

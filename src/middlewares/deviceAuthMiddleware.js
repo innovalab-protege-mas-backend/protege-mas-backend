@@ -25,7 +25,7 @@ const deviceAuthMiddleware = async (req, res, next) => {
   try {
     // 1. Buscar el dispositivo por su token
     const result = await db.query(
-      'SELECT id, id_user, device_uuid, vinculado FROM devices WHERE device_token = $1',
+      'SELECT id, id_user, device_uuid, linked FROM devices WHERE device_token = $1',
       [deviceToken]
     );
 
@@ -36,7 +36,7 @@ const deviceAuthMiddleware = async (req, res, next) => {
     const device = result.rows[0];
 
     // 2. Verificar que el dispositivo no esté desvinculado
-    if (!device.vinculado) {
+    if (!device.linked) {
       return res.status(403).json({ error: 'El dispositivo ha sido desvinculado o revocado' });
     }
 

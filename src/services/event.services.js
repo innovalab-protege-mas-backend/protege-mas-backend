@@ -71,13 +71,13 @@ const construirMensajeNotificacion = (tipoEvento, aliasDispositivo, url) => {
  * @param {string} deviceId - UUID interno del dispositivo en la base de datos.
  */
 const procesarAlertaSiCorresponde = async (evento, deviceId) => {
-  if (!esCritico(evento.tipo_evento)) {
+  if (!esCritico(evento.event_type)) {
     return null;
   }
 
   // Obtener push_tokens activos del tutor asociado al dispositivo
   const query = `
-    SELECT us.push_token, d.nombre_alias
+    SELECT us.push_token, d.alias_name
     FROM devices d
     INNER JOIN user_sessions us ON us.id_user = d.id_user
     WHERE d.id = $1 
@@ -91,8 +91,8 @@ const procesarAlertaSiCorresponde = async (evento, deviceId) => {
     return null;
   }
 
-  const aliasDispositivo = result.rows[0].nombre_alias || 'Dispositivo Protegido';
-  const { title, body } = construirMensajeNotificacion(evento.tipo_evento, aliasDispositivo, evento.url);
+  const aliasDispositivo = result.rows[0].alias_name || 'Dispositivo Protegido';
+  const { title, body } = construirMensajeNotificacion(evento.event_type, aliasDispositivo, evento.url);
 
   // Enviar push a cada sesión activa
   const notificacionesEnviadas = [];
@@ -103,7 +103,7 @@ const procesarAlertaSiCorresponde = async (evento, deviceId) => {
       data: {
         eventId: evento.id,
         deviceId: deviceId,
-        tipoEvento: evento.tipo_evento,
+        tipoEvento: evento.event_type,
         eventTime: evento.event_time
       }
     });
@@ -123,7 +123,7 @@ const procesarAlertaSiCorresponde = async (evento, deviceId) => {
  * @param {Object} eventData - Payload validado del evento.
  */
 const createSingleEvent = async (eventData) => {
-  const { device_uuid, tipo_evento, url, detalle, event_time } = eventData;
+  const { device_uuid, event_type, url, detail, event_time } = eventData;
   const client = await db.connect();
 
   try {
@@ -131,7 +131,7 @@ const createSingleEvent = async (eventData) => {
 
     // 1. Obtener ID interno del dispositivo mediante device_uuid
     const deviceResult = await client.query(
-      'SELECT id, nombre_alias FROM devices WHERE device_uuid = $1',
+      'SELECT id, alias_name FROM devices WHERE device_uuid = $1',
       [device_uuid]
     );
 
@@ -143,16 +143,16 @@ const createSingleEvent = async (eventData) => {
 
     // 2. Registrar evento en la tabla 'protection_events'
     const eventQuery = `
-      INSERT INTO protection_events (id_device, tipo_evento, url, detalle, event_time)
+      INSERT INTO protection_events (id_device, event_type, url, detail, event_time)
       VALUES ($1, $2, $3, $4, $5)
       RETURNING *
     `;
 
     const eventValues = [
       device.id,
-      tipo_evento,
+      event_type,
       url || null,
-      JSON.stringify(detalle || {}),
+      JSON.stringify(detail || {}),
       event_time || new Date()
     ];
 
@@ -161,13 +161,13 @@ const createSingleEvent = async (eventData) => {
 
     // 3. Crear registro en 'alerts' si aplica severidad
     let createdAlert = null;
-    if (esCritico(tipo_evento)) {
-      const { title } = construirMensajeNotificacion(tipo_evento, device.nombre_alias, url);
-      const severidad = obtenerSeveridad(tipo_evento);
+    if (esCritico(event_type)) {
+      const { title } = construirMensajeNotificacion(event_type, device.alias_name, url);
+      const severidad = obtenerSeveridad(event_type);
 
       // Importante: $2::enum_alert_severity realiza el casteo explícito al ENUM de Postgres
       const alertQuery = `
-        INSERT INTO alerts (id_event, nivel_severidad, message, leido, alert_time)
+        INSERT INTO alerts (id_event, severity, message, read, alert_time)
         VALUES ($1, $2::enum_alert_severity, $3, false, $4)
         RETURNING *
       `;
@@ -195,7 +195,7 @@ const createSingleEvent = async (eventData) => {
 
     return {
       ...createdEvent,
-      es_critico: esCritico(createdEvent.tipo_evento),
+      es_critico: esCritico(createdEvent.event_type),
       alert: createdAlert
     };
 
@@ -238,11 +238,11 @@ const getEventsByTutor = async (userId, filterDeviceId = null) => {
     SELECT 
       pe.id,
       pe.id_device,
-      d.nombre_alias,
-      d.modelo_os,
-      pe.tipo_evento,
+      d.alias_name,
+      d.os_model,
+      pe.event_type,
       pe.url,
-      pe.detalle,
+      pe.detail,
       pe.event_time
     FROM protection_events pe
     INNER JOIN devices d ON pe.id_device = d.id
@@ -262,7 +262,7 @@ const getEventsByTutor = async (userId, filterDeviceId = null) => {
 
   return result.rows.map(event => ({
     ...event,
-    es_critico: esCritico(event.tipo_evento)
+    es_critico: esCritico(event.event_type)
   }));
 };
 
@@ -275,17 +275,17 @@ const getAlertsForTutor = async (userId, { soloNoLeidas, limite = 20 } = {}) => 
   let query = `
     SELECT 
       a.id AS alert_id,
-      a.nivel_severidad,
+      a.severity,
       a.message,
-      a.leido,
+      a.read,
       a.alert_time,
       pe.id AS event_id,
-      pe.tipo_evento,
+      pe.event_type,
       pe.url,
-      pe.detalle,
+      pe.detail,
       pe.event_time,
       d.id AS device_id,
-      d.nombre_alias,
+      d.alias_name,
       d.device_uuid
     FROM alerts a
     JOIN protection_events pe ON a.id_event = pe.id
@@ -297,7 +297,7 @@ const getAlertsForTutor = async (userId, { soloNoLeidas, limite = 20 } = {}) => 
 
   if (soloNoLeidas === 'true') {
     queryParams.push(false);
-    query += ` AND a.leido = $${queryParams.length}`;
+    query += ` AND a.read = $${queryParams.length}`;
   }
 
   query += ` ORDER BY a.alert_time DESC LIMIT $${queryParams.length + 1}`;
@@ -315,13 +315,13 @@ const getAlertsForTutor = async (userId, { soloNoLeidas, limite = 20 } = {}) => 
 const markAlertAsRead = async (alertId, userId) => {
   const query = `
     UPDATE alerts a
-    SET leido = true
+    SET read = true
     FROM protection_events pe
     JOIN devices d ON pe.id_device = d.id
     WHERE a.id_event = pe.id 
       AND a.id = $1 
       AND d.id_user = $2
-    RETURNING a.id, a.leido;
+    RETURNING a.id, a.read;
   `;
   const { rows } = await db.query(query, [alertId, userId]);
   return rows[0];

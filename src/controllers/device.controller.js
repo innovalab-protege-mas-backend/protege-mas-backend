@@ -24,21 +24,37 @@ const getDevices = async (req, res) => {
  */
 const unlinkDevice = async (req, res) => {
   try {
-    const { id } = req.params;
-    const userId = req.user.id;
+    const { deviceUuid } = req.params;
+    
+    // Extraemos el token del header de autorización
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ 
+        error: 'Token de dispositivo ausente en los headers' 
+      });
+    }
 
-    const unlinkedDevice = await deviceService.unlinkDevice(id, userId);
+    const deviceToken = authHeader.startsWith('Bearer ') 
+      ? authHeader.split(' ')[1] 
+      : authHeader;
+
+    const unlinkedDevice = await deviceService.unlinkDevice(deviceUuid, deviceToken);
 
     return res.status(200).json({
       message: 'Dispositivo desvinculado y credencial revocada con éxito',
       device: unlinkedDevice
     });
   } catch (error) {
-    if (error.message === 'DEVICE_NOT_FOUND_OR_ALREADY_UNLINKED') {
-      return res.status(404).json({ 
-        error: 'El dispositivo no existe, no pertenece a este tutor o ya se encuentra desvinculado' 
-      });
+    if (error.message === 'DEVICE_NOT_FOUND') {
+      return res.status(404).json({ error: 'El dispositivo no existe' });
     }
+    if (error.message === 'INVALID_DEVICE_CREDENTIALS') {
+      return res.status(401).json({ error: 'Inconsistencia en las credenciales del dispositivo (device_token inválido)' });
+    }
+    if (error.message === 'DEVICE_ALREADY_UNLINKED') {
+      return res.status(400).json({ error: 'El dispositivo ya se encuentra desvinculado' });
+    }
+
     console.error('Error al desvincular dispositivo:', error);
     return res.status(500).json({ error: 'Error interno del servidor' });
   }

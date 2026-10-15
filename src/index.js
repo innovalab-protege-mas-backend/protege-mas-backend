@@ -7,6 +7,7 @@ const authRoutes = require('./routes/auth.routes');
 const deviceRoutes = require('./routes/device.routes');
 const pairingRoutes = require('./routes/pairing.routes');
 const eventRoutes = require('./routes/event.routes');
+//const syncRoutes = require('./routes/sync.routes');
 
 const app = express();
 
@@ -18,6 +19,7 @@ app.use('/auth', authRoutes);
 app.use('/devices', deviceRoutes);
 app.use('/pairing', pairingRoutes);
 app.use('/events', eventRoutes);
+//app.use('/sync', syncRoutes);
 
 // Arrancar servidor y tareas en segundo plano
 const PORT = config.port || 3000;

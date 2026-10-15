@@ -1,4 +1,4 @@
-const pairingService = require('../services/pairing.service');
+const pairingService = require('../services/pairing.services');
 const { consumeCodeSchema } = require('../schemas/pairing.schema');
 
 // ============================================================================
