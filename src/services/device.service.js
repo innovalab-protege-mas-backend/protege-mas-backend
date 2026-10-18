@@ -15,42 +15,24 @@ const getDevicesByUser = async (userId) => {
 /**
  * Desvincula un dispositivo del tutor (revoca credenciales y apaga el flag de vinculación).
  */
-const unlinkDevice = async (deviceUuid, deviceToken) => {
-  // 1. Buscamos el dispositivo por su UUID para verificar su existencia y token
-  const checkResult = await db.query(
-    `SELECT id, device_token, linked FROM devices WHERE device_uuid = $1`,
-    [deviceUuid]
-  );
-
-  if (checkResult.rows.length === 0) {
-    throw new Error('DEVICE_NOT_FOUND');
-  }
-
-  const device = checkResult.rows[0];
-
-  // 2. Validación cruzada: verificamos que el device_token del header coincida con el de la BD
-  if (device.device_token !== deviceToken) {
-    throw new Error('INVALID_DEVICE_CREDENTIALS');
-  }
-
-  // Si ya estaba deslinked, podemos manejarlo o proceder a actualizar igual
-  if (!device.linked) {
-    throw new Error('DEVICE_ALREADY_UNLINKED');
-  }
-
-  // 3. Ejecutamos la desvinculación y limpieza de credenciales
-  const updateResult = await db.query(
+const unlinkDevice = async (deviceId, userId) => {
+  const result = await db.query(
     `UPDATE devices 
       SET linked = false,
           protection_status = false,
           device_token = NULL, 
           push_token = NULL 
-      WHERE device_uuid = $1 
+      WHERE id = $1 AND id_user = $2 AND linked = true
       RETURNING id, alias_name, linked, protection_status`,
-    [deviceUuid]
+    [deviceId, userId]
   );
 
-  return updateResult.rows[0];
+  // Si no actualizó ninguna fila, es porque no existe, no es de este tutor o ya estaba desvinculado
+  if (result.rows.length === 0) {
+    throw new Error('DEVICE_NOT_FOUND_OR_ALREADY_UNLINKED');
+  }
+
+  return result.rows[0];
 };
 
 module.exports = {
