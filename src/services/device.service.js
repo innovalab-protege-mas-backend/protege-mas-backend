@@ -18,17 +18,16 @@ const getDevicesByUser = async (userId) => {
 const unlinkDevice = async (deviceId, userId) => {
   const result = await db.query(
     `UPDATE devices 
-      SET vinculado = false,
-          estado_proteccion = false,
+      SET linked = false,
+          protection_status = false,
           device_token = NULL, 
           push_token = NULL 
-      WHERE id = $1 AND id_user = $2 AND vinculado = true
-      RETURNING id, nombre_alias, vinculado, estado_proteccion`,
+      WHERE id = $1 AND id_user = $2 AND linked = true
+      RETURNING id, alias_name, linked, protection_status`,
     [deviceId, userId]
   );
 
-  // Si no actualizó ninguna fila, es porque el dispositivo no existe, 
-  // no le pertenece al tutor o YA ESTABA desvinculado./
+  // Si no actualizó ninguna fila, es porque no existe, no es de este tutor o ya estaba desvinculado
   if (result.rows.length === 0) {
     throw new Error('DEVICE_NOT_FOUND_OR_ALREADY_UNLINKED');
   }

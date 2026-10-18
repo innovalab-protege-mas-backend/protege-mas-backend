@@ -12,10 +12,10 @@ const EVENT_TYPES = [
 
 const singleEventSchema = z.object({
   device_uuid: z.string({ message: 'El device_uuid es obligatorio' }).min(1, { message: 'El device_uuid no puede estar vacío' }),
-  tipo_evento: z.enum(EVENT_TYPES, { message: 'Tipo de evento no válido' }),
+  event_type: z.enum(EVENT_TYPES, { message: 'Tipo de evento no válido' }),
   url: z.string().nullable().optional(),
-  detalle: z.record(z.any()).optional().default({}), 
-  es_sensible: z.boolean().optional().default(false),
+  detail: z.record(z.any()).optional().default({}), 
+  is_sensitive: z.boolean().optional().default(false),
   event_time: z.string().optional() // Acepta el string ISO enviado por el cliente
 });
 

@@ -24,8 +24,8 @@ const getDevices = async (req, res) => {
  */
 const unlinkDevice = async (req, res) => {
   try {
-    const { id } = req.params;
-    const userId = req.user.id;
+    const { id } = req.id || req.params; // Tomamos el id de los parámetros de la ruta
+    const userId = req.user.id;         // El ID del tutor obtenido del token JWT
 
     const unlinkedDevice = await deviceService.unlinkDevice(id, userId);
 
@@ -39,6 +39,7 @@ const unlinkDevice = async (req, res) => {
         error: 'El dispositivo no existe, no pertenece a este tutor o ya se encuentra desvinculado' 
       });
     }
+
     console.error('Error al desvincular dispositivo:', error);
     return res.status(500).json({ error: 'Error interno del servidor' });
   }

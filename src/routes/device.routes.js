@@ -14,6 +14,6 @@ router.use(authenticateToken);
 router.get('/', deviceController.getDevices);
 
 // Desvincular un dispositivo específico por su ID
-router.patch('/:id/unlink', deviceController.unlinkDevice);
+router.patch('/:id/unlink', authenticateToken, deviceController.unlinkDevice);
 
 module.exports = router;
