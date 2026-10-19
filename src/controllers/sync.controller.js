@@ -1,12 +1,17 @@
-const syncService = require('../services/sync.service');
+const syncService = require('../services/sync.services');
 
 class SyncController {
   async getSystemSync(req, res) {
     try {
-      const result = await syncService.getSystemRules();
+      // Extraemos versión y checksum opcionales enviados por la app cliente en los query params
+      const clientVersion = req.query.version ? parseInt(req.query.version, 10) : null;
+      const clientChecksum = req.query.checksum || null;
+
+      const result = await syncService.getSystemRules({ clientVersion, clientChecksum });
+
       return res.status(200).json({
         success: true,
-        data: result
+        ...result
       });
     } catch (error) {
       console.error('Error en sync system controller:', error);

@@ -1,24 +1,56 @@
 const db = require('../config/db');
 
 class SyncService {
-  async getSystemRules() {
-    const { data, error } = await db
-      .from('system_blocklist')
-      .select('domain, rule_type')
-      .eq('activo', true);
+  async getSystemRules({ clientVersion, clientChecksum }) {
+    // 1. Obtenemos el conteo total de dominios activos y el ID máximo actual
+    // Con esto generamos un checksum y una versión dinámica instantánea.
+    const metaQuery = await db.query(
+      `SELECT COUNT(*)::int as total, COALESCE(MAX(version_id), MAX(id), 0) as max_version FROM system_blocklist WHERE activo = true`
+    );
 
-    if (error) {
-      throw new Error(`Error al obtener la lista de bloqueo del sistema: ${error.message}`);
+    const { total, max_version } = metaQuery.rows[0];
+
+    // La versión puede ser el total de reglas o el max_version (o una combinación)
+    const serverVersion = max_version; 
+    // Hacemos que el checksum sea puramente numérico (el total de registros activos)
+    const serverChecksum = total;
+
+    // 2. Doble verificación numérica estricta: versión y checksum deben coincidir
+    const isUpToDate = 
+      Number(clientVersion) === serverVersion && 
+      Number(clientChecksum) === serverChecksum;
+
+    if (isUpToDate) {
+      return {
+        status: 'UP_TO_DATE',
+        current_version: serverVersion,
+        checksum: serverChecksum,
+        syncedAt: new Date().toISOString()
+      };
     }
 
-    const lotba = data.filter(item => item.rule_type === 'lotba').map(item => item.domain);
-    const regex = data.filter(item => item.rule_type === 'regex').map(item => item.domain);
+    // 3. Si difieren o es la primera sincronización -> Traemos la lista completa
+    const rulesResult = await db.query(
+      `SELECT domain, rule_type FROM system_blocklist WHERE activo = true`
+    );
+
+    const rules = rulesResult.rows;
+
+    const lotba = rules.filter(item => item.rule_type === 'lotba').map(item => item.domain);
+    const keyword = rules.filter(item => item.rule_type === 'keyword').map(item => item.domain);
+    const regex = rules.filter(item => item.rule_type === 'regex').map(item => item.domain);
 
     return {
-      total: data.length,
-      lotba,
-      regex,
-      syncedAt: new Date().toISOString()
+      status: 'RESET',
+      current_version: serverVersion,
+      checksum: serverChecksum,
+      data: {
+        total: rules.length,
+        lotba,
+        keyword,
+        regex,
+        syncedAt: new Date().toISOString()
+      }
     };
   }
 
