@@ -15,13 +15,13 @@ router.get('/system', syncController.getSystemSync);
 // =========================================================================
 
 /**
- * @route   GET /api/v1/sync/custom/user
+ * @route   GET localhost:3000/sync/custom/user
  * @desc    Obtiene las reglas personalizadas activas para el panel del tutor
  */
 router.get('/custom/user', authenticateToken, syncController.getCustomRulesForUser);
 
 /**
- * @route   POST /api/v1/sync/custom/user
+ * @route   POST localhost:3000/sync/custom/user
  * @desc    Agrega o reactiva una regla personalizada y dispara el Silent Push
  */
 router.post('/custom/user', authenticateToken, syncController.addCustomRuleForUser);
@@ -32,7 +32,7 @@ router.post('/custom/user', authenticateToken, syncController.addCustomRuleForUs
 // =========================================================================
 
 /**
- * @route   GET /api/v1/sync/custom/device
+ * @route   GET localhost:3000/sync/custom/device
  * @desc    Sincronización de reglas personalizadas para el dispositivo (Checksum + Timestamp + 7 días)
  */
 router.get('/custom/device', deviceAuthMiddleware, syncController.getCustomRulesForDevice);
