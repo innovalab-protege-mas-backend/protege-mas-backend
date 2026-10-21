@@ -17,4 +17,7 @@ router.post('/login', authController.login);
 // Ruta de Refresh
 router.post('/refresh', authController.refresh);
 
+// Ruta de Logout 
+router.post('/logout', authMiddleware, authController.logout);
+
 module.exports = router;

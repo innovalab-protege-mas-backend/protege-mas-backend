@@ -157,8 +157,31 @@ const refreshTokenService = async (incomingRefreshToken, deviceInfo = null) => {
   };
 };
 
+const logoutService = async (userId, deviceInfo = null) => {
+  if (!userId) {
+    throw new Error('USUARIO_REQUERIDO');
+  }
+
+  // Desactivamos la sesión activa para este usuario y dispositivo específico
+  // Si deviceInfo viene nulo, podemos actualizar la sesión más reciente o usar el match exacto.
+  const result = await db.query(
+    `UPDATE user_sessions 
+     SET is_active = false, 
+         refresh_token_hash = NULL, 
+         push_token = NULL, 
+         ip_address = NULL,
+         expires_at = CURRENT_TIMESTAMP,
+         last_active_at = CURRENT_TIMESTAMP
+     WHERE id_user = $1 AND device_info = $2 AND is_active = true`,
+    [userId, deviceInfo]
+  );
+
+  return { success: true, rowsAffected: result.rowCount };
+};
+
 module.exports = {
   register,
   login,
-  refreshTokenService
+  refreshTokenService,
+  logoutService
 };

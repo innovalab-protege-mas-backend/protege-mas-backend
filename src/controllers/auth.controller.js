@@ -74,8 +74,26 @@ const refresh = async (req, res) => {
   }
 };
 
+const logout = async (req, res) => {
+  try {
+    // req.user viene del middleware de verificación del Access Token
+    const userId = req.user?.id; 
+    const deviceInfo = req.headers['user-agent'] || null;
+
+    await authService.logoutService(userId, deviceInfo);
+
+    return res.status(200).json({
+      message: 'Sesión cerrada exitosamente en este dispositivo.'
+    });
+  } catch (error) {
+    console.error('Error en logout:', error);
+    return res.status(500).json({ error: 'Error interno al cerrar sesión' });
+  }
+};
+
 module.exports = {
   register,
   login,
-  refresh
+  refresh,
+  logout
 };
