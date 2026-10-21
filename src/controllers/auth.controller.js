@@ -46,7 +46,36 @@ const login = async (req, res) => {
   }
 };
 
+const refresh = async (req, res) => {
+  try {
+    const { refresh_token } = req.body;
+    const deviceInfo = req.headers['user-agent'] || null;
+
+    const data = await authService.refreshTokenService(refresh_token, deviceInfo);
+
+    return res.status(200).json({
+      message: 'Token refrescado con éxito',
+      ...data
+    });
+  } catch (error) {
+    if (error.message === 'TOKEN_REQUERIDO') {
+      return res.status(400).json({ error: 'El refresh token es obligatorio' });
+    }
+    if (
+      error.message === 'SESION_INVALIDA_O_EXPIRADA' || 
+      error.message === 'DISPOSITIVO_NO_COINCIDE'
+    ) {
+      // 401 Unauthorized indica a la app móvil que debe limpiar credenciales y mandar al Login
+      return res.status(401).json({ error: 'La sesión ha expirado o es inválida. Por favor, inicie sesión nuevamente.' });
+    }
+
+    console.error('Error en refresh token:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
 module.exports = {
   register,
-  login
+  login,
+  refresh
 };
