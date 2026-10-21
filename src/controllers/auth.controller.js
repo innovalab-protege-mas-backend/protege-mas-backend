@@ -38,7 +38,7 @@ const login = async (req, res) => {
     const data = await authService.login(req.body, reqInfo);
     return res.status(200).json(data);
   } catch (error) {
-    if (error.message === 'CREDANCIALES_INVALIDAS') {
+    if (error.message === 'CREDENCIALES_INVALIDAS') {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
     console.error('Error en login:', error);

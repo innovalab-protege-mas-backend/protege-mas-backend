@@ -111,6 +111,7 @@ const consumePairingCode = async ({ code, device_uuid, alias_name, birth_date, g
 
     return {
       device: deviceResult.rows[0],
+      deviceToken
     };
 
   } catch (error) {
