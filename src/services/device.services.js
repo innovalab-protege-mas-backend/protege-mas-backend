@@ -1,5 +1,5 @@
 const db = require('../config/db');
-const notificationService = require('./notification.services');
+const notificationService = require('./notifications/notification.services');
 
 // ============================================================================
 // SERVICIOS DE GESTIÓN DE DISPOSITIVOS
