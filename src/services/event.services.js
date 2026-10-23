@@ -6,13 +6,26 @@ const notificationService = require('./notifications/notification.services');
 // ============================================================================
 
 /**
- * Evalúa si un tipo de evento requiere la generación de alerta crítica.
- * @param {string} tipoEvento - Identificador del tipo de evento.
+ * Evalúa si un evento registrado se considera crítico para la vista del tutor.
+ * @param {string} eventType - Tipo de evento ('domain', 'uninstall_attempt', etc.)
+ * @param {string|null} actionSlug - Acción asociada ('block', 'alert', 'allow', etc.)
  * @returns {boolean} True si el evento es de carácter crítico.
  */
-const esCritico = (tipoEvento) => {
-  const eventosCriticos = ['uninstall_attempt', 'lotba', 'score_exceeded', 'os_permission_change'];
-  return eventosCriticos.includes(tipoEvento);
+const esCritico = (eventType, actionSlug = null) => {
+  // 1. Si la regla aplicada derivó en un bloqueo, siempre es crítico
+  if (actionSlug === 'block') {
+    return true;
+  }
+
+  // 2. Si es un evento de seguridad/telemetría del dispositivo
+  const eventosSeguridadCriticos = [
+    'uninstall_attempt',
+    'app_install_attempt',
+    'score_exceeded',
+    'os_permission_change'
+  ];
+
+  return eventosSeguridadCriticos.includes(eventType);
 };
 
 /**
@@ -200,23 +213,23 @@ const createSingleEvent = async (eventData) => {
     // 5. Gestión de Alertas
     let createdAlert = null;
     let shouldAlert = false;
-    let severity = 'warning';
+    let severity = 'info';
     let message = '';
 
     if (requiresBlocklistCheck && actionId) {
-      // Si vino de blocklist, evaluamos la acción obtenida de la BD
       const actionDetails = await client.query('SELECT slug FROM actions WHERE id = $1', [actionId]);
       const actionSlug = actionDetails.rows[0]?.slug;
 
       if (actionSlug === 'block' || actionSlug === 'alert') {
         shouldAlert = true;
+        // Si bloquea es critical, si solo alerta es warning
         severity = actionSlug === 'block' ? 'critical' : 'warning';
         message = `Infracción detectada (${event_type}) en ${normalizedValue} para el dispositivo ${device.alias_name}`;
       }
     } else if (!requiresBlocklistCheck) {
-      // Eventos de sistema/seguridad (ej: uninstall_attempt) son críticos por defecto
+      // Eventos de sistema o seguridad del dispositivo
       shouldAlert = true;
-      severity = 'critical';
+      severity = obtenerSeveridad(event_type); // <--- Usamos tu función auxiliar aquí
       message = `Alerta de seguridad (${event_type}) en el dispositivo ${device.alias_name}: ${normalizedValue}`;
     }
 
@@ -319,11 +332,14 @@ const getEventsByTutor = async (userId, filterDeviceId = null) => {
       d.alias_name,
       d.os_model,
       pe.event_type,
-      pe.url,
-      pe.detail,
+      pe.value,
+      c.name AS category,
+      a.slug AS action,
       pe.event_time
     FROM protection_events pe
     INNER JOIN devices d ON pe.id_device = d.id
+    LEFT JOIN categories c ON pe.category_id = c.id
+    LEFT JOIN actions a ON pe.action_id = a.id
     WHERE d.id_user = $1
   `;
 
@@ -340,7 +356,7 @@ const getEventsByTutor = async (userId, filterDeviceId = null) => {
 
   return result.rows.map(event => ({
     ...event,
-    es_critico: esCritico(event.event_type)
+    es_critico: esCritico(event.event_type, event.action) // <-- Pasamos el slug de la acción ('block', etc.)
   }));
 };
 
@@ -352,23 +368,20 @@ const getEventsByTutor = async (userId, filterDeviceId = null) => {
 const getAlertsForTutor = async (userId, { soloNoLeidas, limite = 20 } = {}) => {
   let query = `
     SELECT 
-      a.id AS alert_id,
+      a.id,
+      a.id_event,
+      pe.event_type,
+      pe.value, -- <-- Asegúrate de usar value en lugar de url
+      d.alias_name AS device_name,
       a.severity,
       a.message,
       a.read,
-      a.alert_time,
-      pe.id AS event_id,
-      pe.event_type,
-      pe.url,
-      pe.detail,
-      pe.event_time,
-      d.id AS device_id,
-      d.alias_name,
-      d.device_uuid
+      a.alert_time
     FROM alerts a
-    JOIN protection_events pe ON a.id_event = pe.id
-    JOIN devices d ON pe.id_device = d.id
+    INNER JOIN protection_events pe ON a.id_event = pe.id
+    INNER JOIN devices d ON pe.id_device = d.id
     WHERE d.id_user = $1
+    -- ... tus filtros y ordenamientos
   `;
 
   const queryParams = [userId];
