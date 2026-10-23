@@ -117,19 +117,30 @@ const procesarAlertaSiCorresponde = async (evento, deviceId) => {
 // REGISTRO Y PERSISTENCIA DE EVENTOS
 // ============================================================================
 
-/**
- * Inserta un único evento en base de datos de manera transaccional.
- * Crea el registro en 'alerts' si el evento es calificado como crítico.
- * @param {Object} eventData - Payload validado del evento.
- */
+const normalizeValue = (eventType, rawValue) => {
+  if (!rawValue) return '';
+  
+  if (eventType === 'domain') {
+    try {
+      const urlToParse = rawValue.startsWith('http') ? rawValue : `https://${rawValue}`;
+      const parsed = new URL(urlToParse);
+      return parsed.hostname.toLowerCase();
+    } catch {
+      return rawValue.trim().toLowerCase();
+    }
+  }
+  
+  return rawValue.trim();
+};
+
 const createSingleEvent = async (eventData) => {
-  const { device_uuid, event_type, url, detail, event_time } = eventData;
+  const { device_uuid, event_type, value, event_time } = eventData;
   const client = await db.connect();
 
   try {
     await client.query('BEGIN');
 
-    // 1. Obtener ID interno del dispositivo mediante device_uuid
+    // 1. Obtener ID y alias del dispositivo mediante device_uuid
     const deviceResult = await client.query(
       'SELECT id, alias_name FROM devices WHERE device_uuid = $1',
       [device_uuid]
@@ -138,34 +149,78 @@ const createSingleEvent = async (eventData) => {
     if (deviceResult.rows.length === 0) {
       throw new Error('DEVICE_NOT_FOUND');
     }
-
     const device = deviceResult.rows[0];
 
-    // 2. Registrar evento en la tabla 'protection_events'
+    // 2. Normalizar el valor recibido
+    const normalizedValue = normalizeValue(event_type, value);
+
+    let categoryId = null;
+    let actionId = null;
+
+    // 3. Determinar si el evento requiere búsqueda en blocklists o es de sistema/seguridad
+    const requiresBlocklistCheck = ['domain', 'keyword', 'regex'].includes(event_type);
+
+    if (requiresBlocklistCheck) {
+      // Buscar en system_blocklist y custom_blocklist unificadas
+      const ruleQuery = `
+        SELECT category_id, action_id FROM system_blocklist 
+        WHERE active = true AND rule_type = $1 AND value = $2
+        UNION
+        SELECT category_id, action_id FROM custom_blocklist 
+        WHERE active = true AND rule_type = $1 AND value = $2
+        LIMIT 1;
+      `;
+      const ruleResult = await client.query(ruleQuery, [event_type, normalizedValue]);
+
+      if (ruleResult.rows.length > 0) {
+        categoryId = ruleResult.rows[0].category_id;
+        actionId = ruleResult.rows[0].action_id;
+      }
+    }
+
+    // 4. Registrar evento en la tabla 'protection_events'
     const eventQuery = `
-      INSERT INTO protection_events (id_device, event_type, url, detail, event_time)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO protection_events (id_device, event_type, value, category_id, action_id, event_time)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING *
     `;
 
     const eventValues = [
       device.id,
       event_type,
-      url || null,
-      JSON.stringify(detail || {}),
+      normalizedValue,
+      categoryId,
+      actionId,
       event_time || new Date()
     ];
 
     const eventResult = await client.query(eventQuery, eventValues);
     const createdEvent = eventResult.rows[0];
 
-    // 3. Crear registro en 'alerts' si aplica severidad
+    // 5. Gestión de Alertas
     let createdAlert = null;
-    if (esCritico(event_type)) {
-      const { title } = construirMensajeNotificacion(event_type, device.alias_name, url);
-      const severidad = obtenerSeveridad(event_type);
+    let shouldAlert = false;
+    let severity = 'warning';
+    let message = '';
 
-      // Importante: $2::enum_alert_severity realiza el casteo explícito al ENUM de Postgres
+    if (requiresBlocklistCheck && actionId) {
+      // Si vino de blocklist, evaluamos la acción obtenida de la BD
+      const actionDetails = await client.query('SELECT slug FROM actions WHERE id = $1', [actionId]);
+      const actionSlug = actionDetails.rows[0]?.slug;
+
+      if (actionSlug === 'block' || actionSlug === 'alert') {
+        shouldAlert = true;
+        severity = actionSlug === 'block' ? 'critical' : 'warning';
+        message = `Infracción detectada (${event_type}) en ${normalizedValue} para el dispositivo ${device.alias_name}`;
+      }
+    } else if (!requiresBlocklistCheck) {
+      // Eventos de sistema/seguridad (ej: uninstall_attempt) son críticos por defecto
+      shouldAlert = true;
+      severity = 'critical';
+      message = `Alerta de seguridad (${event_type}) en el dispositivo ${device.alias_name}: ${normalizedValue}`;
+    }
+
+    if (shouldAlert) {
       const alertQuery = `
         INSERT INTO alerts (id_event, severity, message, read, alert_time)
         VALUES ($1, $2::enum_alert_severity, $3, false, $4)
@@ -174,8 +229,8 @@ const createSingleEvent = async (eventData) => {
       
       const alertResult = await client.query(alertQuery, [
         createdEvent.id,
-        severidad,
-        title,
+        severity,
+        message,
         createdEvent.event_time
       ]);
       
@@ -184,19 +239,42 @@ const createSingleEvent = async (eventData) => {
 
     await client.query('COMMIT');
 
-    // 4. Despacho asincrónico de notificaciones Push (No bloqueante)
-    try {
-      procesarAlertaSiCorresponde(createdEvent, device.id).catch(err => {
-        console.error('[Push Notification Error]:', err.message);
-      });
-    } catch (pushErr) {
-      console.error('[Push Notification Sync Error]:', pushErr.message);
+    // 6. Obtener nombres legibles para la respuesta (si aplica)
+    let categoryName = null;
+    let actionSlug = null;
+
+    if (categoryId) {
+      const catRes = await client.query('SELECT name FROM categories WHERE id = $1', [categoryId]);
+      categoryName = catRes.rows[0]?.name || null;
     }
 
+    if (actionId) {
+      const actRes = await client.query('SELECT slug FROM actions WHERE id = $1', [actionId]);
+      actionSlug = actRes.rows[0]?.slug || null;
+    }
+
+    await client.query('COMMIT');
+
+    // Despacho asincrónico de notificaciones Push si se generó alerta
+    if (createdAlert) {
+      try {
+        procesarAlertaSiCorresponde(createdEvent, device.id).catch(err => {
+          console.error('[Push Notification Error]:', err.message);
+        });
+      } catch (pushErr) {
+        console.error('[Push Notification Sync Error]:', pushErr.message);
+      }
+    }
+
+    // Retornamos una estructura limpia y "cocinada" para la API
     return {
-      ...createdEvent,
-      es_critico: esCritico(createdEvent.event_type),
-      alert: createdAlert
+      id: createdEvent.id,
+      event_type: createdEvent.event_type,
+      value: createdEvent.value,
+      category: categoryName,
+      action: actionSlug,
+      event_time: createdEvent.event_time,
+      alert_generated: !!createdAlert // Devuelve true o false de forma elegante
     };
 
   } catch (error) {

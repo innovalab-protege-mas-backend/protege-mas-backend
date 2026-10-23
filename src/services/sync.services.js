@@ -32,14 +32,14 @@ class SyncService {
 
     // 3. Si difieren o es la primera sincronización -> Traemos la lista completa
     const rulesResult = await db.query(
-      `SELECT domain, rule_type FROM system_blocklist WHERE active = true`
+      `SELECT value, rule_type FROM system_blocklist WHERE active = true`
     );
 
     const rules = rulesResult.rows;
 
-    const lotba = rules.filter(item => item.rule_type === 'lotba').map(item => item.domain);
-    const keyword = rules.filter(item => item.rule_type === 'keyword').map(item => item.domain);
-    const regex = rules.filter(item => item.rule_type === 'regex').map(item => item.domain);
+    const lotba = rules.filter(item => item.rule_type === 'lotba').map(item => item.value);
+    const keyword = rules.filter(item => item.rule_type === 'keyword').map(item => item.value);
+    const regex = rules.filter(item => item.rule_type === 'regex').map(item => item.value);
 
     return {
       status: 'RESET',
@@ -61,7 +61,7 @@ class SyncService {
    */
   async getCustomRulesForUser({ userId }) {
     const rulesResult = await db.query(
-      `SELECT domain, rule_type, creation_time 
+      `SELECT value, rule_type, creation_time 
        FROM custom_blocklist 
        WHERE id_user = $1 AND active = true
        ORDER BY creation_time DESC`,
@@ -70,14 +70,14 @@ class SyncService {
 
     const rules = rulesResult.rows;
 
-    const domain = rules.filter(item => item.rule_type === 'domain').map(item => item.domain);
-    const keyword = rules.filter(item => item.rule_type === 'keyword').map(item => item.domain);
+    const value = rules.filter(item => item.rule_type === 'value').map(item => item.value);
+    const keyword = rules.filter(item => item.rule_type === 'keyword').map(item => item.value);
 
     const lastCreation = rules.length > 0 ? rules[0].creation_time : null;
 
     return {
       total: rules.length,
-      domain,
+      value,
       keyword,
       updatedAt: lastCreation ? new Date(lastCreation).toISOString() : null
     };
@@ -87,8 +87,8 @@ class SyncService {
    * Agrega o reactiva una regla personalizada para el Tutor
    * y dispara un Silent Push a todos sus dispositivos vinculados.
    */
-  async addCustomRuleForUser({ userId, domain, ruleType }) {
-    const ALLOWED_TYPES = ['domain', 'keyword']; 
+  async addCustomRuleForUser({ userId, value, ruleType }) {
+    const ALLOWED_TYPES = ['value', 'keyword']; 
 
     if (!ALLOWED_TYPES.includes(ruleType)) {
       const error = new Error(`El tipo de regla '${ruleType}' no está permitido.`);
@@ -96,21 +96,21 @@ class SyncService {
       throw error;
     }
 
-    const cleanDomain = domain.trim().toLowerCase();
+    const cleanvalue = value.trim().toLowerCase();
 
     // UPSERT usando id_user y active
     const query = `
-      INSERT INTO custom_blocklist (id_user, domain, rule_type, active, creation_time)
+      INSERT INTO custom_blocklist (id_user, value, rule_type, active, creation_time)
       VALUES ($1, $2, $3, true, NOW())
-      ON CONFLICT (id_user, domain) 
+      ON CONFLICT (id_user, value) 
       DO UPDATE SET 
         active = true, 
         rule_type = EXCLUDED.rule_type, 
         creation_time = NOW()
-      RETURNING id, domain, rule_type, creation_time;
+      RETURNING id, value, rule_type, creation_time;
     `;
 
-    const result = await db.query(query, [userId, cleanDomain, ruleType]);
+    const result = await db.query(query, [userId, cleanvalue, ruleType]);
     const createdRule = result.rows[0];
 
     // Buscar tokens usando id_user y linked
@@ -188,15 +188,15 @@ class SyncService {
 
     // 2. Si no está al día o pasaron 7 días, obtener las reglas activas
     const rulesResult = await db.query(
-      `SELECT domain, rule_type 
+      `SELECT value, rule_type 
        FROM custom_blocklist 
        WHERE id_user = $1 AND active = true`,
       [userId]
     );
 
     const rules = rulesResult.rows;
-    const domain = rules.filter(item => item.rule_type === 'domain').map(item => item.domain);
-    const keyword = rules.filter(item => item.rule_type === 'keyword').map(item => item.domain);
+    const value = rules.filter(item => item.rule_type === 'value').map(item => item.value);
+    const keyword = rules.filter(item => item.rule_type === 'keyword').map(item => item.value);
 
     return {
       status: 'RESET',
@@ -204,7 +204,7 @@ class SyncService {
       checksum: serverChecksum,
       data: {
         total: rules.length,
-        domain,
+        value,
         keyword,
         syncedAt: new Date().toISOString()
       }
