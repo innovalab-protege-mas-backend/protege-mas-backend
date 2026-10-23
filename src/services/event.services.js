@@ -35,10 +35,10 @@ const esCritico = (eventType, actionSlug = null) => {
  */
 const obtenerSeveridad = (tipoEvento) => {
   switch (tipoEvento) {
-    case 'lotba':
+    case 'system_blocklist':
     case 'uninstall_attempt':
       return 'critical';
-    case 'score_exceeded':
+    case 'app_install_attempt':
     case 'os_permission_change':
       return 'warning';
     default:
@@ -146,8 +146,12 @@ const normalizeValue = (eventType, rawValue) => {
   return rawValue.trim();
 };
 
+/**
+ * Procesa y registra un evento individual de forma idempotente.
+ * @param {Object} eventData - Datos del evento enviados por el cliente.
+ */
 const createSingleEvent = async (eventData) => {
-  const { device_uuid, event_type, value, event_time } = eventData;
+  const { device_uuid, event_type, value, event_time, client_event_id } = eventData;
   const client = await db.connect();
 
   try {
@@ -174,7 +178,6 @@ const createSingleEvent = async (eventData) => {
     const requiresBlocklistCheck = ['domain', 'keyword', 'regex'].includes(event_type);
 
     if (requiresBlocklistCheck) {
-      // Buscar en system_blocklist y custom_blocklist unificadas
       const ruleQuery = `
         SELECT category_id, action_id FROM system_blocklist 
         WHERE active = true AND rule_type = $1 AND value = $2
@@ -191,15 +194,20 @@ const createSingleEvent = async (eventData) => {
       }
     }
 
-    // 4. Registrar evento en la tabla 'protection_events'
+    // 4. Registrar evento en la tabla 'protection_events' de forma idempotente
+    let createdEvent = null;
+    let isNewEvent = false;
+
     const eventQuery = `
-      INSERT INTO protection_events (id_device, event_type, value, category_id, action_id, event_time)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      INSERT INTO protection_events (id_device, client_event_id, event_type, value, category_id, action_id, event_time)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      ON CONFLICT (id_device, client_event_id) DO NOTHING
       RETURNING *
     `;
 
     const eventValues = [
       device.id,
+      client_event_id || null,
       event_type,
       normalizedValue,
       categoryId,
@@ -208,67 +216,79 @@ const createSingleEvent = async (eventData) => {
     ];
 
     const eventResult = await client.query(eventQuery, eventValues);
-    const createdEvent = eventResult.rows[0];
 
-    // 5. Gestión de Alertas
+    if (eventResult.rows.length > 0) {
+      createdEvent = eventResult.rows[0];
+      isNewEvent = true;
+    } else {
+      // Si ya existía (por un reintento del móvil), lo recuperamos de la BD 
+      // para responder con éxito sin duplicar registros ni alertas.
+      const existingEventRes = await client.query(
+        'SELECT * FROM protection_events WHERE id_device = $1 AND client_event_id = $2',
+        [device.id, client_event_id]
+      );
+      createdEvent = existingEventRes.rows[0];
+    }
+
+    // 5. Gestión de Alertas (Solo si es un evento nuevo para evitar duplicar alertas en reintentos)
     let createdAlert = null;
-    let shouldAlert = false;
     let severity = 'info';
     let message = '';
 
-    if (requiresBlocklistCheck && actionId) {
-      const actionDetails = await client.query('SELECT slug FROM actions WHERE id = $1', [actionId]);
-      const actionSlug = actionDetails.rows[0]?.slug;
+    if (isNewEvent) {
+      let shouldAlert = false;
 
-      if (actionSlug === 'block' || actionSlug === 'alert') {
+      if (requiresBlocklistCheck && actionId) {
+        const actionDetails = await client.query('SELECT slug FROM actions WHERE id = $1', [actionId]);
+        const actionSlug = actionDetails.rows[0]?.slug;
+
+        if (actionSlug === 'block' || actionSlug === 'alert') {
+          shouldAlert = true;
+          severity = actionSlug === 'block' ? 'critical' : 'warning';
+          message = `Infracción detectada (${event_type}) en ${normalizedValue} para el dispositivo ${device.alias_name}`;
+        }
+      } else if (!requiresBlocklistCheck) {
         shouldAlert = true;
-        // Si bloquea es critical, si solo alerta es warning
-        severity = actionSlug === 'block' ? 'critical' : 'warning';
-        message = `Infracción detectada (${event_type}) en ${normalizedValue} para el dispositivo ${device.alias_name}`;
+        severity = obtenerSeveridad(event_type);
+        message = `Alerta de seguridad (${event_type}) en el dispositivo ${device.alias_name}: ${normalizedValue}`;
       }
-    } else if (!requiresBlocklistCheck) {
-      // Eventos de sistema o seguridad del dispositivo
-      shouldAlert = true;
-      severity = obtenerSeveridad(event_type); // <--- Usamos tu función auxiliar aquí
-      message = `Alerta de seguridad (${event_type}) en el dispositivo ${device.alias_name}: ${normalizedValue}`;
+
+      if (shouldAlert) {
+        const alertQuery = `
+          INSERT INTO alerts (id_event, severity, message, read, alert_time)
+          VALUES ($1, $2::enum_alert_severity, $3, false, $4)
+          RETURNING *
+        `;
+        
+        const alertResult = await client.query(alertQuery, [
+          createdEvent.id,
+          severity,
+          message,
+          createdEvent.event_time
+        ]);
+        
+        createdAlert = alertResult.rows[0];
+      }
     }
 
-    if (shouldAlert) {
-      const alertQuery = `
-        INSERT INTO alerts (id_event, severity, message, read, alert_time)
-        VALUES ($1, $2::enum_alert_severity, $3, false, $4)
-        RETURNING *
-      `;
-      
-      const alertResult = await client.query(alertQuery, [
-        createdEvent.id,
-        severity,
-        message,
-        createdEvent.event_time
-      ]);
-      
-      createdAlert = alertResult.rows[0];
-    }
-
-    await client.query('COMMIT');
-
-    // 6. Obtener nombres legibles para la respuesta (si aplica)
+    // 6. Obtener nombres legibles para la respuesta utilizando los IDs del evento
     let categoryName = null;
     let actionSlug = null;
 
-    if (categoryId) {
-      const catRes = await client.query('SELECT name FROM categories WHERE id = $1', [categoryId]);
+    if (createdEvent.category_id) {
+      const catRes = await client.query('SELECT name FROM categories WHERE id = $1', [createdEvent.category_id]);
       categoryName = catRes.rows[0]?.name || null;
     }
 
-    if (actionId) {
-      const actRes = await client.query('SELECT slug FROM actions WHERE id = $1', [actionId]);
+    if (createdEvent.action_id) {
+      const actRes = await client.query('SELECT slug FROM actions WHERE id = $1', [createdEvent.action_id]);
       actionSlug = actRes.rows[0]?.slug || null;
     }
 
+    // Confirmamos la transacción atómica completa
     await client.query('COMMIT');
 
-    // Despacho asincrónico de notificaciones Push si se generó alerta
+    // Despacho asincrónico de notificaciones Push solo si se generó una alerta nueva
     if (createdAlert) {
       try {
         procesarAlertaSiCorresponde(createdEvent, device.id).catch(err => {
@@ -279,7 +299,7 @@ const createSingleEvent = async (eventData) => {
       }
     }
 
-    // Retornamos una estructura limpia y "cocinada" para la API
+    // Retornamos estructura limpia. Si era duplicado, alert_generated será false pero responderá con éxito.
     return {
       id: createdEvent.id,
       event_type: createdEvent.event_type,
@@ -287,7 +307,7 @@ const createSingleEvent = async (eventData) => {
       category: categoryName,
       action: actionSlug,
       event_time: createdEvent.event_time,
-      alert_generated: !!createdAlert // Devuelve true o false de forma elegante
+      alert_generated: !!createdAlert
     };
 
   } catch (error) {
