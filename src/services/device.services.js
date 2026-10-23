@@ -7,7 +7,18 @@ const notificationService = require('./notifications/notification.services');
   
 const getDevicesByUser = async (userId) => {
   const result = await db.query(
-    'SELECT * FROM devices WHERE id_user = $1 ORDER BY creation_time DESC',
+    `SELECT 
+       id,
+       device_uuid,
+       alias_name,
+       os_model,
+       protection_status,
+       linked,
+       last_ping,
+       creation_time
+     FROM devices 
+     WHERE id_user = $1 
+     ORDER BY creation_time ASC`,
     [userId]
   );
   return result.rows;
