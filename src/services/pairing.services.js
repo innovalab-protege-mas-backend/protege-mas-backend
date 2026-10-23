@@ -15,7 +15,7 @@ const db = require('../config/db');
 const generatePairingCode = async (userId) => {
   const plainCode = Math.floor(100000 + Math.random() * 900000).toString();
   const codeHash = await bcrypt.hash(plainCode, 10);
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // Expiración: 15 minutos
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // Expiración: 10 minutos
 
   const result = await db.query(
     `INSERT INTO pairing_codes (id_user, code_hash, expires_at)
