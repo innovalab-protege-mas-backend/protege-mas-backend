@@ -1,11 +1,16 @@
-# BA Protege+
-Proyecto de InnovaLab para desarrollar una aplicación de control parental.
+# 🚀 BA Protege+ — Backend API
 
-## Sobre el proyecto
-BA Protege+ busca ofrecer a las familias herramientas para acompañar y cuidar la experiencia digital de niños, niñas y adolescentes.
+Backend oficial desarrollado para el proyecto **BA Protege+** en el marco de **InnovaLab**. 
+Una solución robusta y escalable construida con Node.js y PostgreSQL para la gestión integral de [mencionar brevemente el propósito de la app, ej: alertas, reportes o gestión de recursos].
 
-## Estado
-Estamos organizando el equipo, definiendo el alcance y planificando los primeros sprints. Las funcionalidades y decisiones técnicas se documentarán a medida que avance el desarrollo.
+## 🛠️ Tecnologías Utilizadas
+* **Entorno:** Node.js
+* **Framework:** Express.js
+* **Base de Datos:** PostgreSQL
+* **Control de Versiones:** Git / GitHub
+* **Testing de APIs:** Bruno
 
-## Equipo
-Desarrollado por **InnovaLab**.
+## 📌 Características Principales
+* Arquitectura modular orientada a servicios y controladores.
+* Conexión y persistencia de datos relacionales mediante consultas optimizadas en PostgreSQL.
+* Endpoints RESTful estructurados con manejo centralizado de errores y respuestas estandarizadas.
