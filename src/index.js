@@ -37,9 +37,11 @@ app.use(
   })
 );
 
-// 2. Parseo de JSON y resto de middlewares/rutas
-app.use(express.json());
+// Rutas de prueba (un pequeño paréntesis totalmente random, pero necesario ponerlo antes de implementar api-key)
 app.use('/test', testRoutes);
+
+// 2. Parseo de JSON y middleware
+app.use(express.json());
 app.use(apiKeyMiddleware); // Middleware para validar la API Key en todas las rutas
 
 // Montar módulos de rutas
