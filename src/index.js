@@ -1,7 +1,7 @@
 require('dotenv').config();
 
 const express = require('express');
-const config = require('./config/config');
+const cors = require('cors');
 const { initScheduledJobs } = require('./utils/cleanup');
 const apiKeyValidator = require('./middlewares/apiKeyMiddleware');
 
@@ -15,7 +15,30 @@ const testRoutes = require('./routes/test.routes');
 
 const app = express();
 
-// Middlewares globales
+
+// 1. Configurar orígenes permitidos desde el entorno
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map((origin) => origin.trim())
+  : [];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Permite peticiones sin header Origin (ej: apps móviles nativas, Bruno, Postman, curl)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error('Origen no permitido por política CORS'));
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'] // Ajusta el nombre del header de tu API key si es distinto
+  })
+);
+
+// 2. Parseo de JSON y resto de middlewares/rutas
 app.use(express.json());
 app.use(apiKeyValidator); // Middleware para validar la API Key en todas las rutas
 
