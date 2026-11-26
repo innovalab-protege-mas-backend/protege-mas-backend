@@ -54,26 +54,40 @@ const obtenerSeveridad = (tipoEvento) => {
  */
 const construirMensajeNotificacion = (tipoEvento, aliasDispositivo, valorAsociado) => {
   switch (tipoEvento) {
-    case 'lotba':
     case 'domain':
       return {
         title: `🚨 Alerta de Apuestas en ${aliasDispositivo}`,
         body: `Se detectó e interrumpió un intento de acceso a sitio restringido${valorAsociado ? `: ${valorAsociado}` : '.'}`
       };
+    case 'keyword': case 'regex':
+      return {
+        title: `🚨 Alerta de Contenido Inapropiado en ${aliasDispositivo}`,
+        body: `Se detectó e interrumpió un intento de acceso a contenido restringido${valorAsociado ? `: ${valorAsociado}` : '.'}`
+      };
     case 'uninstall_attempt':
       return {
-        title: `⚠️ Intento de Desinstalación`,
+        title: `⚠️ Intento de Desinstalación en ${aliasDispositivo}`,
         body: `Se intentó desinstalar la app de protección en el dispositivo de ${aliasDispositivo}.`
+      };
+    case 'app_install_attempt':
+      return {
+        title: `⚠️ Intento de Instalación de App en ${aliasDispositivo}`,
+        body: `Se detectó un intento de instalar una aplicación${valorAsociado ? `: ${valorAsociado}` : ' en '}${aliasDispositivo}`
+      };
+    case 'os_permission_change':
+      return {
+        title: `⚠️ Cambio de Permisos en ${aliasDispositivo}`,
+        body: `Se detectó un cambio en los permisos del dispositivo de ${valorAsociado ? `${valorAsociado} en ` : ''}${aliasDispositivo}.`
       };
     case 'score_exceeded':
       return {
-        title: `🔴 Umbral de Riesgo Excedido`,
+        title: `🔴 Umbral de Riesgo Excedido en ${aliasDispositivo}`,
         body: `El nivel de riesgo acumulado en ${aliasDispositivo} superó el límite permitido.`
       };
     default:
       return {
         title: `🔔 Alerta de Protección en ${aliasDispositivo}`,
-        body: `Se registró un evento de tipo: ${tipoEvento}`
+        body: `Se registró un evento de protección${valorAsociado ? `: ${valorAsociado}` : ` de tipo: ${tipoEvento}`}`
       };
   }
 };
