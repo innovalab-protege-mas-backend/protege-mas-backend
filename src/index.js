@@ -17,8 +17,19 @@ const app = express();
 
 // 1. Configurar orígenes permitidos desde el entorno
 const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',').map((origin) => origin.trim())
+  ? process.env.ALLOWED_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean)
   : [];
+
+const vercelPreviewRegex = (() => {
+  const raw = process.env.VERCEL_PREVIEW_REGEX?.trim();
+  if (!raw) return null;
+  try {
+    return new RegExp(raw, 'i');
+  } catch (err) {
+    console.warn('[CORS] VERCEL_PREVIEW_REGEX inválida, se ignora:', err.message);
+    return null;
+  }
+})();
 
 app.use(
   cors({
@@ -27,6 +38,10 @@ app.use(
       if (!origin) return callback(null, true);
 
       if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      if (vercelPreviewRegex && vercelPreviewRegex.test(origin)) {
         return callback(null, true);
       }
 
